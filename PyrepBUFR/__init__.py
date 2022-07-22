@@ -1,11 +1,22 @@
-
-from numpy import array, ceil, frombuffer, uint8, uint16, zeros
 from textwrap import wrap
 
-from .tables import ElementDefinition, read_xml, Table
+from .tables import ElementDefinition, read_xml, Table, parse_int
 from .values import BUFRList
+from .utility import read_integer, read_integers
 
 DEBUG_LEVEL = 0
+
+try:
+    from numpy import array, ceil, zeros
+except ModuleNotFoundError:
+    from math import ceil
+    array = list
+    def zeros(size, dtype=int):
+        if str(dtype).find('int') > -1:
+            dtype = int
+        else:
+            dtype = float
+        return [dtype(0) for i in range(size)]
 
 class InvalidBUFRMessage(Exception):
     pass
@@ -25,11 +36,11 @@ class BitMap(object):
         start_byte = self.cursor // 8
         
         byte_length = ((length + self.cursor) + 8 - ((length + self.cursor) % 8)) // 8
-        value_length = ceil(length / 8.0)
+        value_length = int(ceil(length / 8.0))
 
         bit_mask = sum([2**i for i in range(8 * (byte_length + start_byte) - self.cursor - 1, 8 * (byte_length + start_byte) - (self.cursor + length) - 1, -1)])
 
-        value = ((int.from_bytes(self.__byte_array__[start_byte:start_byte+byte_length], 'big') & bit_mask) >> (byte_length * 8 - length - (self.cursor - start_byte * 8))).to_bytes(value_length, 'big')
+        value = ((int.from_bytes(self.__byte_array__[start_byte:start_byte+byte_length], 'big') & bit_mask) >> int(byte_length * 8 - length - (self.cursor - start_byte * 8))).to_bytes(value_length, 'big')
         self.cursor += length
         return value
     @staticmethod
@@ -38,9 +49,9 @@ class BitMap(object):
 
 class DelayedReplication(ElementDefinition):
     def __init__(self, f=None, x=None, y=None, replication_element=None, data_elements=None):
-        self.f = f
-        self.x = x
-        self.y = y
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
         self.mnemonic = "DREPL"
         self.name = 'Delayed Replication'
         self.replication_element = replication_element
@@ -61,9 +72,9 @@ class DelayedReplication(ElementDefinition):
 
 class Replication(ElementDefinition):
     def __init__(self, f=None, x=None, y=None, data_elements=None):
-        self.f = f
-        self.x = x
-        self.y = y
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
         self.mnemonic = "REPL"
         self.name = 'Replication'
         self.data_elements = data_elements
@@ -123,7 +134,7 @@ class BUFRMessage(object):
         self.__table_a__ = Table(table_type='A')
         self.__table_b__ = Table(table_type='B')
         self.__table_d__ = Table(table_type='D')
-        self.__table_f__ = Table(table_version='F')
+        self.__table_f__ = Table(table_type='F')
         self.__section_start__ = zeros(7, dtype='uint32')
         self.__section_start__[0] = file_offset
         start_word = self.__fobj__.read(4)
@@ -144,23 +155,23 @@ class BUFRMessage(object):
         if DEBUG_LEVEL > 0:
             print('Found start')
         self.__fobj__.seek(self.__section_start__[0] + 4)
-        self.__section_start__[6] = frombuffer(b'\x00' + self.__fobj__.read(3), '>u4')[0]
-        self.bufr_edition = frombuffer(self.__fobj__.read(1), '>u1')[0]
+        self.__section_start__[6] = read_integer(b'\x00' + self.__fobj__.read(3))
+        self.bufr_edition = read_integer(self.__fobj__.read(1))
         self.__section_start__[1] = self.__section_start__[0] + 8
         self.__fobj__.seek(self.__section_start__[1] + (9 if self.bufr_edition == 4 else 7))
-        self.section_2_present = frombuffer(self.__fobj__.read(1), '>?')[0]
+        self.section_2_present = read_integer(self.__fobj__.read(1))
         if self.section_2_present:
             self.__fobj__.seek(self.__section_start__[1])
-            self.__section_start__[2] = self.__section_start__[1] + frombuffer(b'\x00' + self.__fobj__.read(3), '>u4')[0]
+            self.__section_start__[2] = self.__section_start__[1] + read_integer(b'\x00' + self.__fobj__.read(3))
             self.__fobj__.seek(self.__section_start__[2])
-            self.__section_start__[3] = self.__section_start__[2] + frombuffer(b'\x00' + self.__fobj__.read(3), '>u4')[0]
+            self.__section_start__[3] = self.__section_start__[2] + read_integer(b'\x00' + self.__fobj__.read(3))
         else:
             self.__fobj__.seek(self.__section_start__[1])
-            self.__section_start__[3] = self.__section_start__[1] + frombuffer(b'\x00' + self.__fobj__.read(3), '>u4')[0]
+            self.__section_start__[3] = self.__section_start__[1] + read_integer(b'\x00' + self.__fobj__.read(3))
         self.__fobj__.seek(self.__section_start__[3])
-        self.__section_start__[4] = self.__section_start__[3] + frombuffer(b'\x00' + self.__fobj__.read(3), '>u4')[0]
+        self.__section_start__[4] = self.__section_start__[3] + read_integer(b'\x00' + self.__fobj__.read(3))
         self.__fobj__.seek(self.__section_start__[4])
-        self.__section_start__[5] = self.__section_start__[4] + frombuffer(b'\x00' + self.__fobj__.read(3), '>u4')[0]
+        self.__section_start__[5] = self.__section_start__[4] + read_integer(b'\x00' + self.__fobj__.read(3))
         if DEBUG_LEVEL > 0:
            print('Initializing Table A')
         for table in (self.__table_source__.find(table_type='A', originating_center=None)
@@ -196,7 +207,7 @@ class BUFRMessage(object):
         if self.__fobj__.closed:
             raise ClosedBUFRFile('File already closed.')
         self.__fobj__.seek(self.__section_start__[1] + 3)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def originating_center(self):
         if self.__fobj__.closed:
@@ -208,9 +219,9 @@ class BUFRMessage(object):
         self.__fobj__.seek(self.__section_start__[1] + offset)
         value = 0
         if self.bufr_edition == 3:
-            value = frombuffer(self.__fobj__.read(1), '>u1')[0]
+            value = read_integer(self.__fobj__.read(1))
         elif self.bufr_edition == 4:
-            value = frombuffer(self.__fobj__.read(2), '>u2')[0]
+            value = read_integer(self.__fobj__.read(2))
         return value
     @property
     def originating_subcenter(self):
@@ -223,9 +234,9 @@ class BUFRMessage(object):
         self.__fobj__.seek(self.__section_start__[1] + offset)
         value = 0
         if self.bufr_edition == 3:
-            value = frombuffer(self.__fobj__.read(1), '>u1')[0]
+            value = read_integer(self.__fobj__.read(1))
         elif self.bufr_edition == 4:
-            value = frombuffer(self.__fobj__.read(2), '>u2')[0]
+            value = read_integer(self.__fobj__.read(2))
         return value
     @property
     def update_sequence_number(self):
@@ -235,7 +246,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 2
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(2), '>u2')[0]
+        return read_integer(self.__fobj__.read(2))
     @property
     def data_category(self):
         if self.__fobj__.closed:
@@ -244,7 +255,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 2
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def data_category_description(self):
         description = ''
@@ -260,7 +271,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset = 11
             self.__fobj__.seek(self.__section_start__[1] + offset)
-            value = frombuffer(self.__fobj__.read(1), '>u1')[0]
+            value = read_integer(self.__fobj__.read(1))
         return value
     @property
     def local_sub_category(self):
@@ -272,7 +283,7 @@ class BUFRMessage(object):
             offset = 12
         
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def master_table_version(self):
         if self.__fobj__.closed:
@@ -281,7 +292,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 3
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def local_table_version(self):
         if self.__fobj__.closed:
@@ -290,7 +301,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 3
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def file_date(self):
         if self.__fobj__.closed:
@@ -300,12 +311,12 @@ class BUFRMessage(object):
             offset += 3
         self.__fobj__.seek(self.__section_start__[1] + offset)
         if self.bufr_edition == 3:
-            year = frombuffer(self.__fobj__.read(1), '>u1')[0]
-            month, day, hour, minute = frombuffer(self.__fobj__.read(4), '>u1')
+            year = read_integer(self.__fobj__.read(1))
+            month, day, hour, minute = read_integers(self.__fobj__.read(4), 1)
             second = 0
         elif self.bufr_edition == 4:
-            year = frombuffer(self.__fobj__.read(2), '>u2')[0]
-            month, day, hour, minute, second = frombuffer(self.__fobj__.read(5), '>u1')
+            year = read_integer(self.__fobj__.read(2))
+            month, day, hour, minute, second = read_integers(self.__fobj__.read(5), 1)
         return (year, month, day, hour, minute, second)
     
     @property
@@ -316,11 +327,11 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 3
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        year = uint16(0)
+        year = parse_int(0, 2)
         if self.bufr_edition == 3:
-            year = frombuffer(self.__fobj__.read(1), '>u1')[0]
+            year = read_integer(self.__fobj__.read(1))
         elif self.bufr_edition == 4:
-            year = frombuffer(self.__fobj__.read(2), '>u2')[0]
+            year = read_integer(self.__fobj__.read(2))
         return year
     @property
     def file_month(self):
@@ -330,7 +341,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 4
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def file_day(self):
         if self.__fobj__.closed:
@@ -339,7 +350,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 4
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def file_hour(self):
         if self.__fobj__.closed:
@@ -348,7 +359,7 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 4
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def file_minute(self):
         if self.__fobj__.closed:
@@ -357,16 +368,16 @@ class BUFRMessage(object):
         if self.bufr_edition == 4:
             offset += 4
         self.__fobj__.seek(self.__section_start__[1] + offset)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0]
+        return read_integer(self.__fobj__.read(1))
     @property
     def file_second(self):
         if self.__fobj__.closed:
             raise ClosedBUFRFile('File already closed.')
-        value = uint8(0)
+        value = parse_int(0, 1)
         if self.bufr_edition == 4:
             offset = 21
             self.__fobj__.seek(self.__section_start__[1] + offset)
-            value = frombuffer(self.__fobj__.read(1), '>u1')[0]
+            value = read_integer(self.__fobj__.read(1))
         return value
     @property
     def section_1_local_data(self):
@@ -402,19 +413,19 @@ class BUFRMessage(object):
         if self.__fobj__.closed:
             raise ClosedBUFRFile('File already closed.')
         self.__fobj__.seek(self.__section_start__[3] + 4)
-        return frombuffer(self.__fobj__.read(2), '>u2')[0]
+        return read_integer(self.__fobj__.read(2))
     @property
     def observed_data(self):
         if self.__fobj__.closed:
             raise ClosedBUFRFile('File already closed.')
         self.__fobj__.seek(self.__section_start__[3] + 6)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0] & 128 > 0
+        return read_integer(self.__fobj__.read(1)) & 128 > 0
     @property
     def compressed(self):
         if self.__fobj__.closed:
             raise ClosedBUFRFile('File already closed.')
         self.__fobj__.seek(self.__section_start__[3] + 6)
-        return frombuffer(self.__fobj__.read(1), '>u1')[0] & 64 > 0
+        return read_integer(self.__fobj__.read(1)) & 64 > 0
     @property
     def data_descriptors(self):
         if self.__fobj__.closed:
@@ -422,7 +433,7 @@ class BUFRMessage(object):
         self.__fobj__.seek(self.__section_start__[3] + 7)
         end = self.__section_start__[4] - self.__section_start__[3] - 7
         end -= end % 2
-        data = frombuffer(self.__fobj__.read(end), '>u2')
+        data = read_integers(self.__fobj__.read(end), 2)
         return array([array([(x & ( 3 << 14)) >> 14,
                              (x & (63 <<  8)) >>  8,
                              (x &        255)      ]) for x in data])

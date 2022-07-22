@@ -1,9 +1,30 @@
-
-
 from re import split, compile, search
 from xml.etree import cElementTree as ET
 
 from PyrepBUFR.tables import CodeEntry, CodeTableDefinition, ElementDefinition, FlagTableDefinition, SequenceDefinition, SequenceElement, Table
+
+try:
+    from numpy import frombuffer, log, ceil, uint8, arange
+    def read_integer(byte_string, big_endian=True, unsigned=True):
+        padding = b''
+        byte_length = len(byte_string)
+        byte_width = uint8(2 ** ceil(log(byte_length) / log(2)))
+        if byte_length < byte_width:
+            padding += 'b\x00' * (byte_width - byte_length)
+        return frombuffer((padding + byte_string) if big_endian else (byte_string + padding),
+                          ('>' if big_endian else '<') + ('u' if unsigned else 'i') + str(byte_width))[0]
+    def read_integers(byte_string, byte_width, big_endian=True, unsigned=True):
+        padding = b''
+        byte_length = len(byte_string)
+        for i in arange(byte_length % byte_width):
+            padding += b'\x00'
+        return frombuffer(byte_string + padding,
+                          ('>' if big_endian else '<') + ('u' if unsigned else 'i') + str(byte_width))
+except ModuleNotFoundError:
+    def read_integer(byte_string, big_endian=True, unsigned=True):
+        return int.from_bytes(byte_string, 'big' if big_endian else 'little', signed=(not unsigned))
+    def read_integers(byte_string, byte_width, big_endian=True, unsigned=True):
+        return [int.from_bytes(byte_string[i:i+byte_width], 'big' if big_endian else 'little', signed=(not unsigned)) for i in range(0, len(byte_string), byte_width)]
 
 wmo_field_names = {
     'CodeFigure': 'code',

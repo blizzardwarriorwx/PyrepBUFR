@@ -5,19 +5,17 @@ from sys import modules
 
 from .values import *
 
+try:
+    from numpy import dtype
+    def parse_int(value, byte_width, big_endian=True, unsigned=True):
+        return dtype(('u' if unsigned else 'i') + str(byte_width)).type(value) if value is not None else None
+except ModuleNotFoundError:
+    def parse_int(value, byte_width, big_endian=True, unsigned=True):
+        return int(value) if value is not None else None
+
 def xml2class(node):
     cls = getattr(modules[__name__], node.tag)
     return cls.from_xml(cls, node)
-
-def parse_value(value):
-    try:
-        value = int(value)
-    except:
-        try:
-            value = float(value)
-        except:
-            pass
-    return value
 
 def read_xml(filename):
     tree = ET.parse(filename)
@@ -50,7 +48,7 @@ class BufrTableObject(object):
     __replace_duplicate_child__ = False
     @staticmethod
     def from_xml(cls, node):
-        kwargs = dict([(k.replace('-', '_'), parse_value(v)) for k, v in node.attrib.items()])
+        kwargs = dict([(k.replace('-', '_'), v) for k, v in node.attrib.items()])
         cls = cls(**kwargs)
         for child in node:
             cls.append(xml2class(child))
@@ -165,9 +163,9 @@ class Table(BufrTableObject):
     __identity_attributes__ = ['table_type', 'master_table', 'originating_center', 'table_version']
     def __init__(self, table_type=None, master_table=None, originating_center=None, table_version=None):
         self.table_type = table_type
-        self.master_table = master_table
-        self.originating_center = originating_center
-        self.table_version = table_version
+        self.master_table = parse_int(master_table, 1)
+        self.originating_center = parse_int(originating_center, 2)
+        self.table_version = parse_int(table_version, 1)
         self.entries = []
     def to_xml(self):
         elm = super().to_xml()
@@ -176,14 +174,31 @@ class Table(BufrTableObject):
         return elm
     def __len__(self):
         return len(self.entries)
+    def to_json(self):
+        output = []
+        for entry in self.entries:
+            if type(entry) == ElementDefinition:
+                output.append({
+                    'f': entry.f,
+                    'x': entry.x,
+                    'y': entry.y,
+                    'scale': entry.scale,
+                    'reference_value': entry.reference_value,
+                    'bit_width': entry.bit_width,
+                    'unit': entry.unit,
+                    'mnemonic': entry.mnemonic,
+                    'desc_code': entry.desc_code,
+                    'name': entry.name
+                })
+        return output
 
 class SequenceDefinition(BufrTableObject):
     __child_attribute__ = 'elements'
     __identity_attributes__ = ['f', 'x', 'y']
     def __init__(self, f=None, x=None, y=None, mnemonic=None, dcod=None, name=None):
-        self.f = f
-        self.x = x
-        self.y = y
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
         self.mnemonic = mnemonic
         self.dcod = dcod
         self.name = name
@@ -201,20 +216,20 @@ class SequenceDefinition(BufrTableObject):
 
 class SequenceElement(BufrTableObject):
     def __init__(self, f=None, x=None, y=None, name=None):
-        self.f = f
-        self.x = x
-        self.y = y
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
         self.name = name
 
 class ElementDefinition(BufrTableObject):
     __identity_attributes__ = ['f', 'x', 'y']
     def __init__(self, f=None, x=None, y=None, scale=None, reference_value=None, bit_width=None, unit=None, mnemonic=None, desc_code=None, name=None):
-        self.f = f
-        self.x = x
-        self.y = y
-        self.scale = scale
-        self.reference_value = reference_value
-        self.bit_width = bit_width
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
+        self.scale = parse_int(scale, 1, unsigned=False)
+        self.reference_value = parse_int(reference_value, 4, unsigned=False)
+        self.bit_width = parse_int(bit_width, 2)
         self.unit = unit
         self.mnemonic = mnemonic
         self.desc_code = desc_code
@@ -234,25 +249,24 @@ class ElementDefinition(BufrTableObject):
     def __str__(self):
         return '{0:01d}-{1:02d}-{2:03d}'.format(self.f, self.x, self.y)
     def read_value(self, bit_map):
-        data_value = BUFRMissingValue(self.f, self.x, self.y, self.mnemonic)
+        data_value = BUFRMissingValue(self)
         data_bytes = bit_map.read(self.bit_width)
         if not bit_map.is_missing_value(data_bytes, self.bit_width):
             if self.unit == "CCITT IA5":
-                data_value = BUFRString(self.f, self.x, self.y, self.mnemonic, data_bytes.decode('utf-8').split('\x00')[0])
+                data_value = BUFRString(self, data_bytes)
             else:
-                data_value = (self.reference_value + int.from_bytes(data_bytes, 'big')) * 10**(-1 * self.scale)
                 if self.unit == "Code table":
-                    data_value = BUFRCodeTable(self.f, self.x, self.y, self.mnemonic, data_value, self.__table_f__)
+                    data_value = BUFRCodeTable(self, data_bytes, self.__table_f__)
                 elif self.unit == "Flag table":
-                    data_value = BUFRFlagTable(self.f, self.x, self.y, self.mnemonic, data_value)
+                    data_value = BUFRFlagTable(self, data_bytes)
                 else:
-                    data_value = BUFRNumeric(self.f, self.x, self.y, self.mnemonic, data_value)
+                    data_value = BUFRNumeric(self, data_bytes)
         return data_value
 
 class CodeEntry(BufrTableObject):
     __identity_attributes__ = ['code']
     def __init__(self, code=None, meaning=None):
-        self.code = code
+        self.code = parse_int(code, 2)
         self.meaning = meaning
 
 class CodeTableDefinition(BufrTableObject):
@@ -260,13 +274,13 @@ class CodeTableDefinition(BufrTableObject):
     __replace_duplicate_child__ = True
     __identity_attributes__ = ['f', 'x', 'y', 'condition_f', 'condition_x', 'condition_y', 'condition_value']
     def __init__(self, f=None, x=None, y=None, mnemonic=None, condition_f=None, condition_x=None, condition_y=None, condition_value=None):
-        self.f = f
-        self.x= x
-        self.y= y
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
         self.mnemonic = mnemonic
-        self.condition_f = condition_f
-        self.condition_x = condition_x
-        self.condition_y = condition_y
+        self.condition_f = parse_int(condition_f, 1)
+        self.condition_x = parse_int(condition_x, 1)
+        self.condition_y = parse_int(condition_y, 1)
         self.condition_value = condition_value
         self.codes = []
     def to_xml(self):
@@ -280,14 +294,14 @@ class FlagTableDefinition(BufrTableObject):
     __replace_duplicate_child__ = True
     __identity_attributes__ = ['f', 'x', 'y', 'condition_f', 'condition_x', 'condition_y', 'condition_value']
     def __init__(self, f=None, x=None, y=None, mnemonic=None, condition_f=None, condition_x=None, condition_y=None, condition_value=None):
-        self.f = f
-        self.x= x
-        self.y= y
+        self.f = parse_int(f, 1)
+        self.x = parse_int(x, 1)
+        self.y = parse_int(y, 1)
         self.mnemonic = mnemonic
-        self.condition_f = condition_f
-        self.condition_x = condition_x
-        self.condition_y = condition_y
-        self.condition_value = condition_value
+        self.condition_f = parse_int(condition_f, 1)
+        self.condition_x = parse_int(condition_x, 1)
+        self.condition_y = parse_int(condition_y, 1)
+        self.condition_value = parse_int(condition_value, 2)
         self.codes = []
     def to_xml(self):
         elm = super().to_xml()
