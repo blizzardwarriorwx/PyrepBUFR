@@ -266,7 +266,7 @@ class ElementDefinition(BufrTableObject):
 class CodeEntry(BufrTableObject):
     __identity_attributes__ = ['code']
     def __init__(self, code=None, meaning=None):
-        self.code = parse_int(code, 2)
+        self.code = parse_int(code, 4)
         self.meaning = meaning
 
 class CodeTableDefinition(BufrTableObject):
