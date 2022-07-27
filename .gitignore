@@ -128,11 +128,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-data/
-
 # Mac Things
 .DS_Store
 ._.DS_Store
 
 data/
 tables/
+testing/

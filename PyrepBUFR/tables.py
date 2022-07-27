@@ -56,7 +56,7 @@ class BufrTableObject(object):
         pass
     def __iter__(self):
         return BufrObjectIterator(self)
-    def __has__(self, *args, **kwargs):
+    def __has__(self, *args, case_insensitive=False, **kwargs):
         if len(kwargs.keys()) == 0 and len(args) > 0:
             if hasattr(args[0], '__identity_attributes__'):
                 kwargs = dict([(key, getattr(args[0], key)) for key in args[0].__identity_attributes__])
@@ -67,7 +67,12 @@ class BufrTableObject(object):
                     if hasattr(child, key):
                         if key not in child_subset:
                             child_subset[key] = set()
-                        if getattr(child, key, None) == kwargs[key]:
+                        value = getattr(child, key, None)
+                        if type(value) == str and case_insensitive:
+                            value = value.lower()
+                        if type(kwargs[key]) == str and case_insensitive:
+                            kwargs[key] = kwargs[key].lower()
+                        if value == kwargs[key]:
                             child_subset[key].update([i])
         child_subset = child_subset.values()
         if len(child_subset) > 0:
@@ -88,8 +93,8 @@ class BufrTableObject(object):
             kwargs = dict([(key, getattr(item, key)) for key in item.__identity_attributes__])
             has_item = len(self.__has__(**kwargs)) > 0
         return has_item
-    def find(self, **kwargs):
-        indices = self.__has__(**kwargs)
+    def find(self, case_insensitive=False, **kwargs):
+        indices = self.__has__(case_insensitive=case_insensitive, **kwargs)
         result_kwargs = {}
         if hasattr(self, '__identity_attributes__'):
             result_kwargs = dict([(key, getattr(self, key)) for key in self.__identity_attributes__])
@@ -107,7 +112,10 @@ class BufrTableObject(object):
             else:
                 child_attribute = getattr(self, self.__child_attribute__)
                 child_exists = child in self
-                if child_exists and self.__replace_duplicate_child__:
+                if child_exists and child.has_children:
+                    index = self.index(child)
+                    child_attribute[index].append(child)
+                elif child_exists and self.__replace_duplicate_child__:
                     index = self.index(child)
                     child_attribute[index] = child
                 elif not child_exists:
@@ -183,6 +191,13 @@ class TableCollection(BufrTableObject):
                 a.table_version if a.table_version is not None else -1 * 2**64)
     def __init__(self):
         self.tables = []
+    def construct_table_version(self, version, **kwargs):
+        kwargs.pop('table_version', None)
+        result = Table(table_version=version, **kwargs)
+        table_subset = self.find(**kwargs)
+        for table in sorted([t for t in table_subset.tables if t.table_version >= version], key=lambda a:a.table_version, reverse=True):
+            result.append(table)
+        return result
 
 class Table(BufrTableObject):
     __child_attribute__ = 'entries'
@@ -202,9 +217,7 @@ class Table(BufrTableObject):
     def diff(self, other):
         if type(self) != type(other):
             raise ValueError('Cannot compare type {0:s} with type {1:s}'.format(type(self), type(other)))
-        result_kwargs = {}
-        if hasattr(other, '__identity_attributes__'):
-            result_kwargs = dict([(key, getattr(other, key)) for key in self.__identity_attributes__])
+        result_kwargs = other.properties
         result = type(other)(**result_kwargs)
         for i, child in enumerate(other.entries):
             child_type = type(child)
@@ -212,14 +225,17 @@ class Table(BufrTableObject):
             if child_type == ElementDefinition:
                 child_props.pop('name')
                 child_props.pop('desc_code')
+            elif child_type == SequenceElement:
+                child_props.pop('name')
+            elif child_type == SequenceDefinition:
+                child_props.pop('name')
+                child_props.pop('dcod')
             if child.has_children:
-                match = self.find(**child_props)
+                match = self.find(case_insensitive=True, **child_props)
                 if len(match) == 0:
                     result.append(child)
                 else:
-                    child_result_kwargs = {}
-                    if hasattr(match[0], '__identity_attributes__'):
-                        child_result_kwargs = dict([(key, getattr(match[0], key)) for key in match[0].__identity_attributes__])
+                    child_result_kwargs = match[0].properties
                     child_result = type(match[0])(**child_result_kwargs)
                     for sub_child in getattr(child, child.__child_attribute__):
                         sub_child_type = type(sub_child)
@@ -227,7 +243,12 @@ class Table(BufrTableObject):
                         if sub_child_type == ElementDefinition:
                             sub_child_props.pop('name')
                             sub_child_props.pop('desc_code')
-                        sub_match = match[0].find(**sub_child_props)
+                        elif sub_child_type == SequenceElement:
+                            sub_child_props.pop('name')
+                        elif sub_child_type == SequenceDefinition:
+                            sub_child_props.pop('name')
+                            sub_child_props.pop('dcod')
+                        sub_match = match[0].find(case_insensitive=True, **sub_child_props)
                         if len(sub_match) == 0:
                             child_result.append(sub_child)
                     if len(child_result) > 0:
@@ -241,6 +262,9 @@ class Table(BufrTableObject):
 class SequenceDefinition(BufrTableObject):
     __child_attribute__ = 'elements'
     __identity_attributes__ = ['f', 'x', 'y']
+    __replace_duplicate_child__ = True
+    def __child_sort_key__(self, a):
+        return a.index
     def __init__(self, f=None, x=None, y=None, mnemonic=None, dcod=None, name=None):
         self.f = parse_int(f, 1)
         self.x = parse_int(x, 1)
@@ -256,8 +280,9 @@ class SequenceDefinition(BufrTableObject):
         return descriptors
 
 class SequenceElement(BufrTableObject):
-    __identity_attributes__ = ['f', 'x', 'y']
-    def __init__(self, f=None, x=None, y=None, name=None):
+    __identity_attributes__ = ['index']
+    def __init__(self, index=None, f=None, x=None, y=None, name=None):
+        self.index = parse_int(index, 1)
         self.f = parse_int(f, 1)
         self.x = parse_int(x, 1)
         self.y = parse_int(y, 1)

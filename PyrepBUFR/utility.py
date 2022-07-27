@@ -115,10 +115,11 @@ def convert_ncep_D_table(in_file, table):
                 ))
             else:
                 parts[1] = [int(x) for x in parts[1].replace('>','').strip().split('-')]
-                table.entries[-1].append(SequenceElement(f=parts[1][0],
-                                                        x=parts[1][1],
-                                                        y=parts[1][2],
-                                                        name=parts[2].strip()))
+                table.entries[-1].append(SequenceElement(index=len(table.entries[-1].elements)+1,
+                                                         f=parts[1][0],
+                                                         x=parts[1][1],
+                                                         y=parts[1][2],
+                                                         name=parts[2].strip()))
         line = in_file.readline().strip()
 
 def convert_ncep_F_table(in_file, table):

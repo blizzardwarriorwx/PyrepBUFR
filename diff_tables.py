@@ -23,4 +23,7 @@ diff_table_name = '_'.join([args.prefix] + [str(prop) for prop in [args.table_ty
 base_table = read_xml(join(args.output_dir, a_table_name))
 other_table = read_xml(join(args.output_dir, b_table_name))
 
-write_xml(base_table.diff(other_table), join(args.output_dir, diff_table_name))
+diff_table = base_table.diff(other_table)
+
+if len(diff_table) > 0:
+    write_xml(diff_table, join(args.output_dir, diff_table_name))
