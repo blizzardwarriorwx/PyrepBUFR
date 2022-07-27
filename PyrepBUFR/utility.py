@@ -1,7 +1,7 @@
 from re import split, compile, search
 from xml.etree import cElementTree as ET
 
-from PyrepBUFR.tables import CodeEntry, CodeTableDefinition, ElementDefinition, FlagTableDefinition, SequenceDefinition, SequenceElement, Table
+from PyrepBUFR.tables import CodeEntry, CodeFlagDefinition, ElementDefinition, SequenceDefinition, SequenceElement, Table
 
 try:
     from numpy import frombuffer, log, ceil, uint8, arange
@@ -142,16 +142,13 @@ def convert_ncep_F_table(in_file, table):
                         if len(codes) > 0:
                             for condition_field in condition_fields:
                                 for condition_value in condition_values:
-                                    kwargs = dict(f=f, x=x, y=y, mnemonic=mnemonic)
+                                    kwargs = dict(f=f, x=x, y=y, mnemonic=mnemonic, is_flag=flag_type=='FLAG')
                                     if condition_field is not None:
                                         kwargs['condition_f'] = condition_field[0]
                                         kwargs['condition_x'] = condition_field[1]
                                         kwargs['condition_y'] = condition_field[2]
                                         kwargs['condition_value'] = condition_value
-                                    if flag_type == 'CODE':
-                                        definition = CodeTableDefinition(**kwargs)
-                                    elif flag_type == 'FLAG':
-                                        definition = FlagTableDefinition(**kwargs)
+                                    definition = CodeFlagDefinition(**kwargs)
                                     for code in codes:
                                         definition.append(CodeEntry(code=code[0], meaning=code[1]))
                                     table.append(definition)
@@ -166,16 +163,13 @@ def convert_ncep_F_table(in_file, table):
                 if len(codes) > 0:
                     for condition_field in condition_fields:
                         for condition_value in condition_values:
-                            kwargs = dict(f=f, x=x, y=y, mnemonic=mnemonic)
+                            kwargs = dict(f=f, x=x, y=y, mnemonic=mnemonic, is_flag=flag_type=='FLAG')
                             if condition_field is not None:
                                 kwargs['condition_f'] = condition_field[0]
                                 kwargs['condition_x'] = condition_field[1]
                                 kwargs['condition_y'] = condition_field[2]
                                 kwargs['condition_value'] = condition_value
-                            if flag_type == 'CODE':
-                                definition = CodeTableDefinition(**kwargs)
-                            elif flag_type == 'FLAG':
-                                definition = FlagTableDefinition(**kwargs)
+                            definition = CodeFlagDefinition(**kwargs)
                             for code in codes:
                                 definition.append(CodeEntry(code=code[0], meaning=code[1]))
                             table.append(definition)

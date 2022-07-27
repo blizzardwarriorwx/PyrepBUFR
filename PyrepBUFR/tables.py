@@ -1,4 +1,3 @@
-# from os.path import dirname, abspath
 from xml.dom.minidom import parseString
 from xml.etree import cElementTree as ET, ElementInclude
 from sys import modules
@@ -25,7 +24,7 @@ def read_xml(filename):
 
 def write_xml(xml_tree, filename):
     with open(filename, 'w') as out_file:
-        out_file.write(xml_tree.to_string())
+        out_file.write(xml_tree.to_xml())
 
 class BufrObjectIterator(object):
     def __init__(self, object):
@@ -61,7 +60,7 @@ class BufrTableObject(object):
         if len(kwargs.keys()) == 0 and len(args) > 0:
             if hasattr(args[0], '__identity_attributes__'):
                 kwargs = dict([(key, getattr(args[0], key)) for key in args[0].__identity_attributes__])
-        child_subset = {}#dict([(k, set()) for k in kwargs])
+        child_subset = {}
         if hasattr(self, '__child_attribute__'):
             for i, child in enumerate(getattr(self, self.__child_attribute__)):
                 for key in kwargs:
@@ -74,11 +73,15 @@ class BufrTableObject(object):
         if len(child_subset) > 0:
             child_subset = set.intersection(*child_subset)
         return child_subset
+    def __len__(self):
+        if not self.has_children:
+            raise ValueError('{0} object has not length'.format(self.__class__.__name__))
+        return len(getattr(self, self.__child_attribute__))
     def index(self, *args, **kwargs):
-        indicies = self.__has__(*args, **kwargs)
-        if len(indicies) == 0:
-            indicies.update([-1])
-        return sorted(indicies)[0]
+        indices = self.__has__(*args, **kwargs)
+        if len(indices) == 0:
+            indices.update([-1])
+        return sorted(indices)[0]
     def __contains__(self, item):
         has_item = False
         if hasattr(item, '__identity_attributes__'):
@@ -86,14 +89,14 @@ class BufrTableObject(object):
             has_item = len(self.__has__(**kwargs)) > 0
         return has_item
     def find(self, **kwargs):
-        indicies = self.__has__(**kwargs)
+        indices = self.__has__(**kwargs)
         result_kwargs = {}
         if hasattr(self, '__identity_attributes__'):
             result_kwargs = dict([(key, getattr(self, key)) for key in self.__identity_attributes__])
         result = type(self)(**result_kwargs)
-        if hasattr(self, '__child_attribute__') and len(indicies) > 0:
+        if hasattr(self, '__child_attribute__') and len(indices) > 0:
             child_attribute = getattr(self, self.__child_attribute__)
-            setattr(result, result.__child_attribute__,[child_attribute[i] for i in indicies])
+            setattr(result, result.__child_attribute__,[child_attribute[i] for i in indices])
         return result
     def append(self, child):
         if child is not None and hasattr(self, '__child_attribute__'):
@@ -111,15 +114,37 @@ class BufrTableObject(object):
                     child_attribute.append(child)
                 if hasattr(self, '__child_sort_key__'):
                     child_attribute.sort(key=self.__child_sort_key__)
-    def to_xml(self):
+    def to_element(self):
         elm = ET.Element(self.__class__.__name__)
         for att in self.__dict__:
             att_value = getattr(self, att)
             if att_value is not None and type(att_value) != list:
                 elm.set(att.replace('_', '-'), str(getattr(self, att)))
+        if hasattr(self, '__child_attribute__'):
+            child_attribute = getattr(self, self.__child_attribute__)
+            for child in child_attribute:
+                elm.append(child.to_element())
         return elm
-    def to_string(self):
-        return parseString(ET.tostring(self.to_xml())).toprettyxml()
+    def to_dict(self):
+        output = None
+        
+        if hasattr(self, '__child_attribute__'):
+            output = []
+            child_attribute = getattr(self, self.__child_attribute__)
+            for child in child_attribute:
+                child_json = child.to_dict()
+                if type(child_json) == dict:
+                    output.append(child_json)
+                elif type(child_json) == list:
+                    prefix = child.__class__.__name__
+                    parent_keys = [('{0:s}:{1:s}'.format(prefix, key), value)  for key, value in child.__dict__.items() if key != child.__child_attribute__ and key[0] != '_']
+                    for child_json_entry in child_json:
+                        output.append(dict(parent_keys + list(child_json_entry.items())))
+        else:
+            output = dict([(key, value)  for key, value in self.__dict__.items() if key[0] != '_'])
+        return output
+    def to_xml(self):
+        return parseString(ET.tostring(self.to_element())).toprettyxml()
     def __getitem__(self, item):
         if not hasattr(self, '__child_attribute__'):
             raise TypeError("'{0:s}' object is not subscriptable")
@@ -140,57 +165,78 @@ class BufrTableObject(object):
         result.append(self)
         result.append(b)
         return result
+    @property
+    def has_children(self):
+        return hasattr(self, '__child_attribute__')
+    @property
+    def properties(self):
+        child_attribute = getattr(self, '__child_attribute__', None)
+        return dict([(key, value) for key, value in self.__dict__.items() if key != child_attribute and key[0] != '_'])
 
 class TableCollection(BufrTableObject):
     __child_attribute__ = 'tables'
     __replace_duplicate_child__ = True
-    @staticmethod
-    def __child_sort_key__(a):
+    def __child_sort_key__(self, a):
         return (a.table_type, 
                 a.master_table if a.master_table is not None else -1 * 2**64, 
                 a.originating_center if a.originating_center is not None else -1 * 2**64, 
                 a.table_version if a.table_version is not None else -1 * 2**64)
     def __init__(self):
         self.tables = []
-    def to_xml(self):
-        elm = super().to_xml()
-        for table in self.tables:
-            elm.append(table.to_xml())
-        return elm
 
 class Table(BufrTableObject):
     __child_attribute__ = 'entries'
+    __replace_duplicate_child__ = True
     __identity_attributes__ = ['table_type', 'master_table', 'originating_center', 'table_version']
+    def __child_sort_key__(self, a):
+        return  [(lambda v: v if v is not None else -1 * 2**64)(getattr(a, key, None)) for key in ['is_flag', 'code', 'f', 'x', 'y', 'condition_f', 'condition_x', 'condition_y', 'condition_value']]
+
     def __init__(self, table_type=None, master_table=None, originating_center=None, table_version=None):
         self.table_type = table_type
         self.master_table = parse_int(master_table, 1)
         self.originating_center = parse_int(originating_center, 2)
         self.table_version = parse_int(table_version, 1)
         self.entries = []
-    def to_xml(self):
-        elm = super().to_xml()
-        for entry in self.entries:
-            elm.append(entry.to_xml())
-        return elm
     def __len__(self):
         return len(self.entries)
-    def to_json(self):
-        output = []
-        for entry in self.entries:
-            if type(entry) == ElementDefinition:
-                output.append({
-                    'f': entry.f,
-                    'x': entry.x,
-                    'y': entry.y,
-                    'scale': entry.scale,
-                    'reference_value': entry.reference_value,
-                    'bit_width': entry.bit_width,
-                    'unit': entry.unit,
-                    'mnemonic': entry.mnemonic,
-                    'desc_code': entry.desc_code,
-                    'name': entry.name
-                })
-        return output
+    def diff(self, other):
+        if type(self) != type(other):
+            raise ValueError('Cannot compare type {0:s} with type {1:s}'.format(type(self), type(other)))
+        result_kwargs = {}
+        if hasattr(other, '__identity_attributes__'):
+            result_kwargs = dict([(key, getattr(other, key)) for key in self.__identity_attributes__])
+        result = type(other)(**result_kwargs)
+        for i, child in enumerate(other.entries):
+            child_type = type(child)
+            child_props = child.properties
+            if child_type == ElementDefinition:
+                child_props.pop('name')
+                child_props.pop('desc_code')
+            if child.has_children:
+                match = self.find(**child_props)
+                if len(match) == 0:
+                    result.append(child)
+                else:
+                    child_result_kwargs = {}
+                    if hasattr(match[0], '__identity_attributes__'):
+                        child_result_kwargs = dict([(key, getattr(match[0], key)) for key in match[0].__identity_attributes__])
+                    child_result = type(match[0])(**child_result_kwargs)
+                    for sub_child in getattr(child, child.__child_attribute__):
+                        sub_child_type = type(sub_child)
+                        sub_child_props = sub_child.properties
+                        if sub_child_type == ElementDefinition:
+                            sub_child_props.pop('name')
+                            sub_child_props.pop('desc_code')
+                        sub_match = match[0].find(**sub_child_props)
+                        if len(sub_match) == 0:
+                            child_result.append(sub_child)
+                    if len(child_result) > 0:
+                        result.append(child_result)
+            else:
+                match = self.find(**child_props)
+                if len(match) == 0:
+                    result.append(child)
+        return result
 
 class SequenceDefinition(BufrTableObject):
     __child_attribute__ = 'elements'
@@ -203,11 +249,6 @@ class SequenceDefinition(BufrTableObject):
         self.dcod = dcod
         self.name = name
         self.elements = []
-    def to_xml(self):
-        elm = super().to_xml()
-        for element in self.elements:
-            elm.append(element.to_xml())
-        return elm
     def get_descriptors(self):
         descriptors = []
         for element in self.elements:
@@ -215,6 +256,7 @@ class SequenceDefinition(BufrTableObject):
         return descriptors
 
 class SequenceElement(BufrTableObject):
+    __identity_attributes__ = ['f', 'x', 'y']
     def __init__(self, f=None, x=None, y=None, name=None):
         self.f = parse_int(f, 1)
         self.x = parse_int(x, 1)
@@ -269,43 +311,20 @@ class CodeEntry(BufrTableObject):
         self.code = parse_int(code, 4)
         self.meaning = meaning
 
-class CodeTableDefinition(BufrTableObject):
+class CodeFlagDefinition(BufrTableObject):
     __child_attribute__ = 'codes'
     __replace_duplicate_child__ = True
-    __identity_attributes__ = ['f', 'x', 'y', 'condition_f', 'condition_x', 'condition_y', 'condition_value']
-    def __init__(self, f=None, x=None, y=None, mnemonic=None, condition_f=None, condition_x=None, condition_y=None, condition_value=None):
+    __identity_attributes__ = ['f', 'x', 'y', 'is_flag', 'condition_f', 'condition_x', 'condition_y', 'condition_value']
+    def __child_sort_key__(self, a):
+        return a.code
+    def __init__(self, f=None, x=None, y=None, mnemonic=None, is_flag=None, condition_f=None, condition_x=None, condition_y=None, condition_value=None):
         self.f = parse_int(f, 1)
         self.x = parse_int(x, 1)
         self.y = parse_int(y, 1)
         self.mnemonic = mnemonic
+        self.is_flag = str(is_flag).lower() == 'true'
         self.condition_f = parse_int(condition_f, 1)
         self.condition_x = parse_int(condition_x, 1)
         self.condition_y = parse_int(condition_y, 1)
         self.condition_value = condition_value
         self.codes = []
-    def to_xml(self):
-        elm = super().to_xml()
-        for code in self.codes:
-            elm.append(code.to_xml())
-        return elm
-
-class FlagTableDefinition(BufrTableObject):
-    __child_attribute__ = 'codes'
-    __replace_duplicate_child__ = True
-    __identity_attributes__ = ['f', 'x', 'y', 'condition_f', 'condition_x', 'condition_y', 'condition_value']
-    def __init__(self, f=None, x=None, y=None, mnemonic=None, condition_f=None, condition_x=None, condition_y=None, condition_value=None):
-        self.f = parse_int(f, 1)
-        self.x = parse_int(x, 1)
-        self.y = parse_int(y, 1)
-        self.mnemonic = mnemonic
-        self.condition_f = parse_int(condition_f, 1)
-        self.condition_x = parse_int(condition_x, 1)
-        self.condition_y = parse_int(condition_y, 1)
-        self.condition_value = parse_int(condition_value, 2)
-        self.codes = []
-    def to_xml(self):
-        elm = super().to_xml()
-        for code in self.codes:
-            elm.append(code.to_xml())
-        return elm
-
