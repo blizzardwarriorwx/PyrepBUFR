@@ -1,7 +1,7 @@
 from re import split
 from xml.etree import ElementTree as ET
 
-from PyrepBUFR.tables import CodeFlagDefinition, CodeFlagElement, ElementDefinition, SequenceDefinition, SequenceElement, Table
+from PyrepBUFR.tables import BUFRDataType, CodeFlagDefinition, CodeFlagElement, ElementDefinition, SequenceDefinition, SequenceElement, Table
 
 try:
     from numpy import frombuffer, log, ceil, uint8, arange
@@ -25,6 +25,30 @@ except ModuleNotFoundError:
         return int.from_bytes(byte_string, 'big' if big_endian else 'little', signed=(not unsigned))
     def read_integers(byte_string, byte_width, big_endian=True, unsigned=True):
         return [int.from_bytes(byte_string[i:i+byte_width], 'big' if big_endian else 'little', signed=(not unsigned)) for i in range(0, len(byte_string), byte_width)]
+
+wmo_field_names = {
+    'CodeFigure': 'code',
+    'Meaning_en': 'meaning'
+}
+
+def convert_wmo_table(filename):
+    tree = ET.parse(filename)
+    root = tree.getroot()
+    table = Table('A', 0, None, 0)
+    for child in root:
+        if child.tag == 'BUFR_TableA_en':
+            kwargs = dict([(wmo_field_names[field.tag], field.text) for field in child if field.tag in wmo_field_names])
+            if kwargs['code'].find('-') < 0:
+                kwargs['code'] = [int(kwargs['code']), int(kwargs['code'])]
+            else:
+                kwargs['code'] = [int(x) for x in kwargs['code'].split('-')]
+            for i in range(int(kwargs['code'][0]), int(kwargs['code'][1])+1):
+                kwargs['code'] = i
+                table.append(BUFRDataType(
+                    kwargs['code'],
+                    kwargs['meaning']
+                ))
+    return table
 
 def convert_ncep_table(filename):
     table = None

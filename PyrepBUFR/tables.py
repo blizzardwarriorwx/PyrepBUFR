@@ -6,10 +6,11 @@ from xml.dom.minidom import parseString
 from xml.etree import ElementTree as ET, ElementInclude
 
 try:
-    from numpy import dtype
+    from numpy import dtype, array
     def parse_int(value, byte_width, big_endian=True, unsigned=True):
         return dtype(('u' if unsigned else 'i') + str(byte_width)).type(value) if value is not None else None
 except ModuleNotFoundError:
+    array = list
     def parse_int(value, byte_width, big_endian=True, unsigned=True):
         return int(value) if value is not None else None
 
@@ -144,6 +145,15 @@ class TableCollection(BUFRTableObjectBase, BUFRTableContainerBase):
         return TableCollection(
             [obj2dict(xml2class(child)) for child in elm]
         )
+    def construct_table_version(self, table_type, table_version, master_table=None, originating_center=None):
+        table = Table(table_type, master_table, originating_center, table_version)
+        for table_content in sorted(self.find(lambda id: id.table_type==table_type and id.master_table==master_table and id.originating_center==originating_center and id.table_version>=table_version).values(), key=lambda a: a.id.table_version, reverse=True):
+            for item in table_content.values():
+                if item.id in table and item.is_container:
+                    table[item.id].extend(item)
+                else:
+                    table.extend(item)
+        return table
 
 class Table(BUFRTableObjectBase, BUFRTableContainerBase):
     __slots__ = ('id',)
@@ -175,6 +185,25 @@ class Table(BUFRTableObjectBase, BUFRTableContainerBase):
             match = self_keys == other_keys
             if match:
                 match = min([self[key] == other[key] for key in self_keys]) and other.id == self.id
+        return match
+
+class BUFRDataType(BUFRTableObjectBase):
+    __slots__ = ('id', 'description')
+    __id_class__ = namedtuple('BUFRDataTypeID', ('code'))
+    def __init__(self, code, description):
+        super().__initialize_id__(self.__id_class__(parse_int(code, 1)))
+        self.description = description
+    @staticmethod
+    def from_xml(elm):
+        return BUFRDataType(
+            elm.attrib.get('code', None),
+            elm.attrib.get('description', None)
+        )
+    def __eq__(self, other):
+        match = super().__eq__(other)
+        if match:
+            match = (self.id == other.id
+                 and self.description == other.description)
         return match
 
 class ElementDefinition(BUFRTableObjectBase):
@@ -218,6 +247,8 @@ class ElementDefinition(BUFRTableObjectBase):
             elm.attrib.get('desc-code', None),
             elm.attrib.get('name', None)
         )
+    def __str__(self):
+        return '{0:01d}-{1:02d}-{2:03d}'.format(*self.id)
 
 class SequenceDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
     __slots__ = ('id', 'mnemonic', 'dcod', 'name')
@@ -226,7 +257,7 @@ class SequenceDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
         super().__init__(*args, **kwargs)
         super().__initialize_id__(self.__id_class__(
             f=parse_int(f, 1),
-            x=parse_int(y, 1),
+            x=parse_int(x, 1),
             y=parse_int(y, 1)
         ))
         self.mnemonic = mnemonic
@@ -252,6 +283,8 @@ class SequenceDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
             if match:
                 match = min([self[key] == other[key] for key in self_keys]) and other.id == self.id
         return match
+    def get_descriptors(self):
+        return array([array((item.f, item.x, item.y)) for item in self.values()])
 
 class SequenceElement(BUFRTableObjectBase):
     __slots__ = ('id', 'f', 'x', 'y', 'name')

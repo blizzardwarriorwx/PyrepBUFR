@@ -1,3 +1,4 @@
+from collections import namedtuple
 from textwrap import wrap
 
 from .tables import ElementDefinition, read_xml, Table, parse_int
@@ -48,16 +49,21 @@ class BitMap(object):
         return sum([2**i for i in range(length)]).to_bytes(len(value), 'big') == value
 
 class DelayedReplication(ElementDefinition):
-    def __init__(self, f=None, x=None, y=None, replication_element=None, data_elements=None):
-        self.f = parse_int(f, 1)
-        self.x = parse_int(x, 1)
-        self.y = parse_int(y, 1)
+    __slots__ = ('id', 'mnemonic', 'name', 'replication_element', 'data_elements')
+    __id_class__ = namedtuple('DelayedReplicationID', ('f', 'x', 'y'))
+    def __init__(self, f, x, y, replication_element, data_elements):
+        super().__initialize_id__(self.__id_class__(
+            f=parse_int(f, 1), 
+            x=parse_int(x, 1), 
+            y=parse_int(y, 1)
+        ))
         self.mnemonic = "DREPL"
         self.name = 'Delayed Replication'
         self.replication_element = replication_element
         self.data_elements = data_elements
     def __repr__(self):
-        return super().__repr__()[:-1] + ', \n    replication_element={0}, \n    data_elements=[\n        {1}\n    ]\n)'.format(self.replication_element, ',\n        '.join([str(x) for x in self.data_elements]))
+        base = super().__repr__()
+        return base[:base.find(', replication_element')] + ', \n    replication_element={0}, \n    data_elements=[\n        {1}\n    ]\n)'.format(repr(self.replication_element), ',\n        '.join([repr(x) for x in self.data_elements]))
     def __str__(self):
         return super().__str__() + '\n ' + '\n '.join([str(x) for x in self.data_elements])
     def read_value(self, bit_map):
@@ -71,15 +77,20 @@ class DelayedReplication(ElementDefinition):
         return output
 
 class Replication(ElementDefinition):
+    __slots__ = ('id', 'mnemonic', 'name', 'data_elements')
+    __id_class__ = namedtuple('ReplicationID', ('f', 'x', 'y'))
     def __init__(self, f=None, x=None, y=None, data_elements=None):
-        self.f = parse_int(f, 1)
-        self.x = parse_int(x, 1)
-        self.y = parse_int(y, 1)
+        super().__initialize_id__(self.__id_class__(
+            f=parse_int(f, 1), 
+            x=parse_int(x, 1), 
+            y=parse_int(y, 1)
+        ))
         self.mnemonic = "REPL"
         self.name = 'Replication'
         self.data_elements = data_elements
     def __repr__(self):
-        return super().__repr__()[:-1] + ', \n    replication_count={0}, \n    data_elements=[\n        {1}\n    ]\n)'.format(self.x, ',\n        '.join([str(x) for x in self.data_elements]))
+        base = super().__repr__()
+        return base[:base.find(', data_elements')] + ', \n    replication_count={0}, \n    data_elements=[\n        {1}\n    ]\n)'.format(self.x, ',\n        '.join([repr(x) for x in self.data_elements]))
     def __str__(self):
         return super().__str__() + '\n ' + '\n '.join([str(x) for x in self.data_elements])
     def read_value(self, bit_map):
@@ -131,16 +142,16 @@ class BUFRMessage(object):
             self.__fobj__ = open(filename, 'rb')
         else:
             self.__fobj__ = filename
-        self.__table_a__ = Table(table_type='A')
-        self.__table_b__ = Table(table_type='B')
-        self.__table_d__ = Table(table_type='D')
-        self.__table_f__ = Table(table_type='F')
+        self.__table_a__ = Table('A', None, None, None)
+        self.__table_b__ = Table('B', None, None, None)
+        self.__table_d__ = Table('D', None, None, None)
+        self.__table_f__ = Table('F', None, None, None)
         self.__section_start__ = zeros(7, dtype='uint32')
         self.__section_start__[0] = file_offset
         start_word = self.__fobj__.read(4)
         file_start = start_word == b'BUFR'
         while not file_start:
-            if DEBUG_LEVEL > 1:
+            if DEBUG_LEVEL > 2:
                 print('Seeking ahead')
             self.__section_start__[0] += 1
             self.__fobj__.seek(self.__section_start__[0])
@@ -152,7 +163,7 @@ class BUFRMessage(object):
         if not file_start:
             raise InvalidBUFRMessage('File contains no valid BUFR messages')
     
-        if DEBUG_LEVEL > 0:
+        if DEBUG_LEVEL > 1:
             print('Found start')
         self.__fobj__.seek(self.__section_start__[0] + 4)
         self.__section_start__[6] = read_integer(b'\x00' + self.__fobj__.read(3))
@@ -172,29 +183,29 @@ class BUFRMessage(object):
         self.__section_start__[4] = self.__section_start__[3] + read_integer(b'\x00' + self.__fobj__.read(3))
         self.__fobj__.seek(self.__section_start__[4])
         self.__section_start__[5] = self.__section_start__[4] + read_integer(b'\x00' + self.__fobj__.read(3))
-        if DEBUG_LEVEL > 0:
-           print('Initializing Table A')
-        for table in (self.__table_source__.find(table_type='A', originating_center=None)
-                    + self.__table_source__.find(table_type='A', originating_center=self.originating_center)
-                    + self.__table_source__.find(table_type='AX')):
+        if DEBUG_LEVEL > 1:
+            print('Initializing Table A')
+        for table in (self.__table_source__.construct_table_version('A', 0, master_table=self.bufr_master_table)
+                    + self.__table_source__.construct_table_version('A', self.local_table_version, master_table=self.bufr_master_table, originating_center=self.originating_center)
+                    + self.__table_source__.construct_table_version('AX', 0)).values():
             self.__table_a__.append(table)
-        if DEBUG_LEVEL > 0:
-           print('Initializing Table B')
-        for table in (self.__table_source__.find(table_type='B', master_table=self.bufr_master_table, originating_center=None, table_version=self.master_table_version)
-                    + self.__table_source__.find(table_type='B', master_table=self.bufr_master_table, originating_center=self.originating_center, table_version=self.local_table_version)
-                    + self.__table_source__.find(table_type='BX')):
+        if DEBUG_LEVEL > 1:
+            print('Initializing Table B')
+        for table in (self.__table_source__.construct_table_version('B', self.master_table_version, master_table=self.bufr_master_table, originating_center=None)
+                    + self.__table_source__.construct_table_version('B', self.local_table_version,  master_table=self.bufr_master_table, originating_center=self.originating_center)
+                    + self.__table_source__.construct_table_version('BX', 0)).values():
             self.__table_b__.append(table)
-        if DEBUG_LEVEL > 0:
+        if DEBUG_LEVEL > 1:
            print('Initializing Table D')
-        for table in (self.__table_source__.find(table_type='D', master_table=self.bufr_master_table, originating_center=None, table_version=self.master_table_version)
-                    + self.__table_source__.find(table_type='D', master_table=self.bufr_master_table, originating_center=self.originating_center, table_version=self.local_table_version)
-                    + self.__table_source__.find(table_type='DX')):
+        for table in (self.__table_source__.construct_table_version('D', self.master_table_version, master_table=self.bufr_master_table, originating_center=None)
+                    + self.__table_source__.construct_table_version('D', self.local_table_version,  master_table=self.bufr_master_table, originating_center=self.originating_center)
+                    + self.__table_source__.construct_table_version('DX', 0)).values():
             self.__table_d__.append(table)
-        if DEBUG_LEVEL > 0:
+        if DEBUG_LEVEL > 1:
            print('Initializing Table F')
-        for table in (self.__table_source__.find(table_type='F', master_table=self.bufr_master_table, originating_center=None, table_version=self.master_table_version)
-                    + self.__table_source__.find(table_type='F', master_table=self.bufr_master_table, originating_center=self.originating_center, table_version=self.local_table_version)
-                    + self.__table_source__.find(table_type='FX')):
+        for table in (self.__table_source__.construct_table_version('F', self.master_table_version, master_table=self.bufr_master_table, originating_center=None)
+                    + self.__table_source__.construct_table_version('F', self.local_table_version,  master_table=self.bufr_master_table, originating_center=self.originating_center)
+                    + self.__table_source__.construct_table_version('FX', 0)).values():
             self.__table_f__.append(table)
         
     def close(self):
@@ -259,9 +270,9 @@ class BUFRMessage(object):
     @property
     def data_category_description(self):
         description = ''
-        codes = self.__table_a__.find(code=self.data_category)
+        codes = self.__table_a__.find(lambda id: id.code==self.data_category)
         if codes is not None:
-            description = codes[0].meaning
+            description = codes.iloc(0).description
         return description
     @property
     def international_data_sub_category(self):
@@ -453,24 +464,23 @@ class BUFRMessage(object):
         while i < number_of_descriptors:
             file_descriptor = file_descriptors[i]
             if file_descriptor[0] == 0:
-                element = self.__table_b__.find(f=file_descriptor[0], x=file_descriptor[1], y=file_descriptor[2])
+                element = self.__table_b__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
                 if not element.is_empty:
-                    element = element[0]
-                    element.set_table_f(self.__table_f__)
+                    element = element.iloc(0)
                     expanded_descriptors.append(element)
             elif file_descriptor[0] == 1:
                 if file_descriptor[2] == 0:
-                    expanded_descriptors.append(DelayedReplication(f=file_descriptor[0], x=file_descriptor[1], y=file_descriptor[2], replication_element=self.expand_descriptors(file_descriptors[i+1:i+2])[0], data_elements=self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2])))
+                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+1:i+2])[0], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2])))
                     i += file_descriptor[1]+1
                 else:
-                    expanded_descriptors.append(Replication(f=file_descriptor[0], x=file_descriptor[1], y=file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
+                    expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
                     i += file_descriptor[1]
             elif file_descriptor[0] == 2:
                 print('Operator Found')
             elif file_descriptor[0] == 3:
-                sequence = self.__table_d__.find(f=file_descriptor[0], x=file_descriptor[1], y=file_descriptor[2])
+                sequence = self.__table_d__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
                 if not sequence.is_empty:
-                    sequence = self.expand_descriptors(sequence[0].get_descriptors())
+                    sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
                     expanded_descriptors.extend(sequence)
             i += 1
         return expanded_descriptors
@@ -489,7 +499,7 @@ class BUFRMessage(object):
                 'Originating Sub-Center': 'originating_subcenter',
                 'Update Sequence Number': 'update_sequence_number',
                 'Flag (Presence of Section 2)': 'section_2_present',
-                'BUFR Data Category': 'data_category',
+                'BUFR Data Category': 'data_category' if DEBUG_LEVEL == 0 else 'data_category_description',
                 'International Sub-Category': 'international_data_sub_category',
                 'Local Sub-Category': 'local_sub_category',
                 'Version Number of Master Table': 'master_table_version',
@@ -512,11 +522,12 @@ class BUFRMessage(object):
                 'Flag (Observed Data)': 'observed_data',
                 'Flag (Compressed Data)': 'compressed',
                 'Data Descriptors': lambda : '\n\n' + '\n'.join(wrap('  '.join(['{0:01d}-{1:02d}-{2:03d}'.format(*x) for x in self.data_descriptors]), width=50)) + '\n',
-                'Expanded Descriptors': lambda : '\n\n' + '\n'.join(wrap(', '.join([y.strip() for y in ('\n'.join([str(x) for x in self.expand_descriptors(self.data_descriptors)]).split('\n') )]), width=50))
+                'Expanded Descriptors': lambda : (('\n\n' + '\n'.join(wrap(', '.join([y.strip() for y in ('\n'.join([str(x) for x in self.expand_descriptors(self.data_descriptors)]).split('\n') )]), width=50))) if DEBUG_LEVEL == 0 else
+                                                  ('\n\n' + '\n'.join([repr(x) for x in self.expand_descriptors(self.data_descriptors)])))
             },
             {
                 'Length of Section 4 (bytes)': lambda : str(self.__section_start__[5] - self.__section_start__[4]),
-                '': lambda :  '\n{0:=^50s}\n'.format(' Begin Section 4 Data ') + '\n'.join(wrap(str(self.section_4_data_bytes), width=48)) + '\n' + '{0:=^50s}\n'.format(' End Section 4 Data ')
+                '': lambda :  '\n{0:=^50s}\n'.format(' Begin Section 4 Data ') + '\n'.join(wrap(str(self.section_4_data_bytes), width=51)) + '\n' + '{0:=^50s}\n'.format(' End Section 4 Data ')
             }
         ]
 
