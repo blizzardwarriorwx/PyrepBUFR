@@ -1,7 +1,7 @@
-from re import split, compile, search
-from xml.etree import cElementTree as ET
+from re import split
+from xml.etree import ElementTree as ET
 
-from PyrepBUFR.tables import CodeEntry, CodeFlagDefinition, ElementDefinition, SequenceDefinition, SequenceElement, Table
+from PyrepBUFR.tables import CodeFlagDefinition, CodeFlagElement, ElementDefinition, SequenceDefinition, SequenceElement, Table
 
 try:
     from numpy import frombuffer, log, ceil, uint8, arange
@@ -25,27 +25,6 @@ except ModuleNotFoundError:
         return int.from_bytes(byte_string, 'big' if big_endian else 'little', signed=(not unsigned))
     def read_integers(byte_string, byte_width, big_endian=True, unsigned=True):
         return [int.from_bytes(byte_string[i:i+byte_width], 'big' if big_endian else 'little', signed=(not unsigned)) for i in range(0, len(byte_string), byte_width)]
-
-wmo_field_names = {
-    'CodeFigure': 'code',
-    'Meaning_en': 'meaning'
-}
-
-def convert_wmo_table(filename):
-    tree = ET.parse(filename)
-    root = tree.getroot()
-    table = Table(table_type='A')
-    for child in root:
-        if child.tag == 'BUFR_TableA_en':
-            kwargs = dict([(wmo_field_names[field.tag], field.text) for field in child if field.tag in wmo_field_names])
-            if kwargs['code'].find('-') < 0:
-                kwargs['code'] = [int(kwargs['code']), int(kwargs['code'])]
-            else:
-                kwargs['code'] = [int(x) for x in kwargs['code'].split('-')]
-            for i in range(int(kwargs['code'][0]), int(kwargs['code'][1])+1):
-                kwargs['code'] = i
-                table.append(CodeEntry(**kwargs))
-    return table
 
 def convert_ncep_table(filename):
     table = None
@@ -84,99 +63,105 @@ def convert_ncep_B_table(in_file, table):
             parts[4] = parts[4].strip()
             parts[5] = [x.strip() for x in parts[5].strip().split(';')]
             table.append(ElementDefinition(
-                f=parts[0][0],
-                x=parts[0][1],
-                y=parts[0][2],
-                scale=parts[1],
-                reference_value=parts[2],
-                bit_width=parts[3],
-                unit=parts[4],
-                mnemonic=parts[5][0],
-                desc_code=parts[5][1],
-                name=parts[5][2]
+                parts[0][0],
+                parts[0][1],
+                parts[0][2],
+                parts[1],
+                parts[2],
+                parts[3],
+                parts[4],
+                parts[5][0],
+                parts[5][1],
+                parts[5][2]
             ))
         line = in_file.readline().strip()
 
 def convert_ncep_D_table(in_file, table):
+    index = 0
     line = in_file.readline().strip()
+    sequence = None
     while line != 'END':
         if line != '' and line[0] != '#':
             parts = split(r'\s*\|\s*', line.strip())
             if len(parts[0]) > 0:
                 parts[0] = [int(x) for x in parts[0].strip().split('-')]
                 parts[1] = [x.strip() for x in parts[1].strip().split(';')]
-                table.append(SequenceDefinition(
-                    f=parts[0][0],
-                    x=parts[0][1],
-                    y=parts[0][2],
-                    mnemonic=parts[1][0],
-                    dcod=parts[1][1],
-                    name=parts[1][2],
-                ))
+                if sequence is not None:
+                    table.append(sequence)
+                sequence = SequenceDefinition(
+                    parts[0][0],
+                    parts[0][1],
+                    parts[0][2],
+                    parts[1][0],
+                    parts[1][1],
+                    parts[1][2],
+                )
+                index = 0
             else:
                 parts[1] = [int(x) for x in parts[1].replace('>','').strip().split('-')]
-                table.entries[-1].append(SequenceElement(index=len(table.entries[-1].elements)+1,
-                                                         f=parts[1][0],
-                                                         x=parts[1][1],
-                                                         y=parts[1][2],
-                                                         name=parts[2].strip()))
+                index += 1
+                sequence.append(SequenceElement(index,
+                                                parts[1][0],
+                                                parts[1][1],
+                                                parts[1][2],
+                                                parts[2].strip()))
         line = in_file.readline().strip()
+    table.append(sequence)
 
 def convert_ncep_F_table(in_file, table):
-    match_regex = compile(r'\s+\d-\d{2}-\d{3}\s+\|\s+\w+\s+;\s+(?:CODE|FLAG)\s+(?:\|\s+(?:\d-\d{2}-\d{3},?)+=\d+)?\s*(?:\|\s+\d+\s+>\s+\|\s+[^\n]+\s+)+(?:\|\s+\d+\s+\|\s+[^\n]+)')
-    chunk = ''
-    condition_fields = [None]
-    condition_values  = [None]
+    line = in_file.readline().strip()
+    f = x = y =  None
+    conditional_ids = []
+    conditional_values = []
     codes = []
-    line = in_file.readline()
-    while line.strip() != 'END':
-        if line.strip() != '' and line[0] != '#':
-            chunk += line
-            match = search(match_regex, chunk)
-            if match is not None:
-                for table_line in chunk.strip().split('\n'):
-                    parts = split(r'\s*\|\s*', table_line.strip())
-                    if len(parts[0]) > 0:
-                        f, x, y = [int(p) for p in parts[0].strip().split('-')]
-                        mnemonic, flag_type = [p.strip() for p in parts[1].strip().split(';')]
-                    elif search(r'^\d-\d\d-\d\d\d', parts[1].strip()) is not None:
-                        if len(codes) > 0:
-                            for condition_field in condition_fields:
-                                for condition_value in condition_values:
-                                    kwargs = dict(f=f, x=x, y=y, mnemonic=mnemonic, is_flag=flag_type=='FLAG')
-                                    if condition_field is not None:
-                                        kwargs['condition_f'] = condition_field[0]
-                                        kwargs['condition_x'] = condition_field[1]
-                                        kwargs['condition_y'] = condition_field[2]
-                                        kwargs['condition_value'] = condition_value
-                                    definition = CodeFlagDefinition(**kwargs)
-                                    for code in codes:
-                                        definition.append(CodeEntry(code=code[0], meaning=code[1]))
-                                    table.append(definition)
-                                    del definition
-                            codes = []
-                        condition_fields, condition_values = parts[1].split('=')
-                        condition_values = [int(cv.strip()) for cv in condition_values.split(',')] 
-                        condition_fields = [[int(cf) for cf in cfs.split('-')] for cfs in condition_fields.split(',')]
-                    else:
-                        codes.append((int(parts[1].replace('>','').strip()), parts[2].strip()))
-                            
+    while line != 'END':
+        if line != '' and line[0] != '#':
+            parts = split(r'\s*\|\s*', line.strip())
+            if len(parts[0]) > 0:
+                f, x, y = [int(x) for x in parts[0].strip().split('-')]
+                mnemonic, code_type = [x.strip() for x in parts[1].strip().split(';')]
+            elif len(parts) == 2:
                 if len(codes) > 0:
-                    for condition_field in condition_fields:
-                        for condition_value in condition_values:
-                            kwargs = dict(f=f, x=x, y=y, mnemonic=mnemonic, is_flag=flag_type=='FLAG')
-                            if condition_field is not None:
-                                kwargs['condition_f'] = condition_field[0]
-                                kwargs['condition_x'] = condition_field[1]
-                                kwargs['condition_y'] = condition_field[2]
-                                kwargs['condition_value'] = condition_value
-                            definition = CodeFlagDefinition(**kwargs)
-                            for code in codes:
-                                definition.append(CodeEntry(code=code[0], meaning=code[1]))
-                            table.append(definition)
-                            del definition
-                condition_fields = [None]
-                condition_values  = [None]
+                    if len(conditional_ids) > 0:
+                        for conditional_id in conditional_ids:
+                            for conditional_value in conditional_values:
+                                table.append(CodeFlagDefinition(
+                                    f, x, y, code_type == 'FLAG',
+                                    conditional_id[0], conditional_id[1], conditional_id[2],
+                                    conditional_value, mnemonic, codes
+                                ))
+                    else:
+                        table.append(CodeFlagDefinition(
+                            f, x, y, code_type == 'FLAG',
+                            None, None, None,
+                            None, mnemonic, codes
+                        ))
+                conditional_ids = []
+                conditional_values = []
                 codes = []
-                chunk = ''
-        line = in_file.readline()
+                parts = parts[1].split('=')
+                conditional_ids = [[int(x) for x in y.strip().split('-')] for y in parts[0].split(',')]
+                conditional_values = [int(x) for x in parts[1].split(',')]
+            else:                    
+                code = CodeFlagElement(parts[1].replace('>', '').strip(), parts[2].strip())
+                codes.append((code.id, code))
+                if parts[1].find('>') == -1:
+                    if len(codes) > 0:
+                        if len(conditional_ids) > 0:
+                            for conditional_id in conditional_ids:
+                                for conditional_value in conditional_values:
+                                    table.append(CodeFlagDefinition(
+                                        f, x, y, code_type == 'FLAG',
+                                        conditional_id[0], conditional_id[1], conditional_id[2],
+                                        conditional_value, mnemonic, codes
+                                    ))
+                        else:
+                            table.append(CodeFlagDefinition(
+                                f, x, y, code_type == 'FLAG',
+                                None, None, None,
+                                None, mnemonic, codes
+                            ))
+                    conditional_ids = []
+                    conditional_values = []
+                    codes = []
+        line = in_file.readline().strip()
