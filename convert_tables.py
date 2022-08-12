@@ -1,8 +1,7 @@
 from argparse import ArgumentParser
 from os.path import join
 
-from PyrepBUFR.tables import write_xml
-from PyrepBUFR.utility import convert_ncep_table, convert_wmo_table
+from PyrepBUFR.tables import write_xml, convert_ncep_table, convert_wmo_table
 
 parser = ArgumentParser(description='Process WMO/NCEP BUFR tables into XML format')
 parser.add_argument('-w', '--wmo', action='store_const', dest='convert_function', const=convert_wmo_table, default=convert_ncep_table, help='Convert WMO tables')

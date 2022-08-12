@@ -1,15 +1,22 @@
-try:
-    from numpy import min_scalar_type
-    def get_min_type(value):
-        return min_scalar_type(value).type(value)
-except ModuleNotFoundError:
-    def get_min_type(value):
-        return value
+from .utility import byte_integer, ceil, get_min_type
 
 class BUFRValue(object):
-    def __init__(self, element, bytes):
+    __slots__ = ('element', '__bytes__')
+    @classmethod
+    def create(cls, element):
+        return cls(element, None)
+    @classmethod
+    def create_from_table(cls, table, f, x, y):
+        element = table.find(lambda id: id == (f, x, y))
+        if element.is_empty:
+            raise IndexError('Element f={0}, x={1}, y={2} not found in table.'.format(f,x,y))
+        return cls(element.iloc(0), None)
+    def __init__(self, element, byte_string):
         self.element = element
-        self.__bytes__ = bytes
+        if byte_string is None:
+            self.set_missing()
+        else:
+            self.__bytes__ = byte_string
     @property
     def f(self):
         return self.element.f
@@ -22,51 +29,99 @@ class BUFRValue(object):
     @property
     def mnemonic(self):
         return self.element.mnemonic
+    @property
+    def is_missing(self):
+        return sum([2**i for i in range(self.element.bit_width)]).to_bytes(len(self.__bytes__), 'big') == self.__bytes__
+    def set_missing(self):
+        self.__bytes__ = sum([2**i for i in range(self.element.bit_width)]).to_bytes( int(ceil(self.element.bit_width / 8)) , 'big')
     def __repr__(self):
         return '{0:s} {1:s} {2}'.format(self.__class__.__name__, self.mnemonic, str(self.data))
 
 class BUFRNumeric(BUFRValue):
     @property
     def data(self):
+        return_value = None
+        if not self.is_missing:
+            if self.element.scale == 0:
+                return_value = get_min_type(self.element.reference_value + int.from_bytes(self.__bytes__, 'big'))
+            else:
+                return_value = get_min_type((self.element.reference_value + int.from_bytes(self.__bytes__, 'big')) * 10.0**(-1 * self.element.scale))
+        return return_value
+    @data.setter
+    def data(self, value):
         if self.element.scale == 0:
-            return_value = (self.element.reference_value + int.from_bytes(self.__bytes__, 'big'))
+            value = value - self.element.reference_value
         else:
-            return_value = (self.element.reference_value + int.from_bytes(self.__bytes__, 'big')) * 10.0**(-1 * self.element.scale)
-        return get_min_type(return_value)
+            value = int(round(value * 10.0**self.element.scale - self.element.reference_value))
+        self.__bytes__ = byte_integer(get_min_type(value), self.element.bit_width)
 
 class BUFRString(BUFRValue):
     @property
     def data(self):
-        return self.__bytes__.decode('utf-8').split('\x00')[0]
+        return_value = None
+        if not self.is_missing:
+            return_value = self.__bytes__.decode('utf-8').split('\x00')[0]
+        return return_value
+    @data.setter
+    def data(self, value):
+        value = value.encode('ascii') + b'\x00'
+        value += ((self.element.bit_width // 8) - len(value)) * b' '
+        self.__bytes__ = value
 
 class BUFRCodeTable(BUFRValue):
-    def __init__(self, element, bytes, table):
-        super().__init__(element, bytes)
-        self.__table__ = table
-    def get_meaning(self):
-        meaning = ''
-        codes = self.__table__.find(f=self.f, x=self.x, y=self.y)
-        if not codes.is_empty:
-            if len(codes) == 1:
-                codes = codes[0].find(code=self.data)
-                if not codes.is_empty:
-                    meaning = codes[0].meaning
-        return meaning
+    __slots__ = '__codes__'
+    def __init__(self, element, byte_string):
+        super().__init__(element, byte_string)
+        self.__codes__ = None
+    def set_codes(self, codes):
+        self.__codes__ = dict([(x.code, x.meaning) for x in codes.values()])
     @property
     def data(self):
-        return (self.element.reference_value + int.from_bytes(self.__bytes__, 'big')) * 10.0**(-1 * self.element.scale)
+        meaning = None
+        if not self.is_missing and self.__codes__ is not None:
+            meaning = self.__codes__.get(self.data_raw, meaning)
+        return meaning
+    @data.setter
+    def data(self, value):
+        code_switch = dict([(v, k) for k, v in self.__codes__.items()])
+        self.data_raw = code_switch.get(value, sum([2**i for i in range(self.element.bit_width)]))
+    @property
+    def data_raw(self):
+        return_value = None
+        if not self.is_missing:
+            return_value = get_min_type(self.element.reference_value + int.from_bytes(self.__bytes__, 'big'))
+        return return_value
+    @data_raw.setter
+    def data_raw(self, value):
+        self.__bytes__ = byte_integer(get_min_type(value - self.element.reference_value), self.element.bit_width)
 
 class BUFRFlagTable(BUFRValue):
+    __slots__ = '__flags__'
+    def __init__(self, element, byte_string):
+        super().__init__(element, byte_string)
+        self.__flags__ = None
+    def set_flags(self, flags):
+        self.__flags__ = dict([(1 << (self.element.bit_width - x.code), x.meaning) for x in flags.values()])
     @property
     def data(self):
-        return (self.element.reference_value + int.from_bytes(self.__bytes__, 'big')) * 10.0**(-1 * self.element.scale)
-
-class BUFRMissingValue(BUFRValue):
-    def __init__(self, element):
-        super().__init__(element, None)
+        return_value = None
+        if not self.is_missing and self.__flags__ is not None:
+            value = self.data_raw
+            return_value = [v for k, v in self.__flags__.items() if k & value > 0]
+        return return_value
+    @data.setter
+    def data(self, value):
+        flag_switch = dict([(v, k) for k, v in self.__flags__.items()])
+        self.data_raw = sum([flag_switch.get(x, 0) for x in value])
     @property
-    def data(self):
-        return None
+    def data_raw(self):
+        return_value = None
+        if not self.is_missing:
+            return_value = get_min_type(self.element.reference_value + int.from_bytes(self.__bytes__, 'big'))
+        return return_value
+    @data_raw.setter
+    def data_raw(self, value):
+        self.__bytes__ = byte_integer(get_min_type(value - self.element.reference_value), self.element.bit_width)
 
 class BUFRList(list):
     pass

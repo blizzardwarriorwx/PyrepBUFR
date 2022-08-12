@@ -7,7 +7,7 @@ A pure Python implementation WMO BUFR decoder that can handle NWS/NCEP prepbufr 
 Prequisites
 -----------
 
-None outside of the Python standard packages:
+None outside of the Python standard packages
  - collections
  - copy
  - math
@@ -18,6 +18,9 @@ None outside of the Python standard packages:
    - dom
    - etree
 Numpy will be used if present.
+
+Description
+-----------
 
 Currently under construction in a pre-alpha state
 
