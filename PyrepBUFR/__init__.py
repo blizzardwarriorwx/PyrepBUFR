@@ -8,9 +8,9 @@ from .utility import read_integer, read_integers
 DEBUG_LEVEL = 0
 
 try:
-    from numpy import array, ceil, zeros
+    from numpy import array, ceil, zeros, floor
 except ModuleNotFoundError:
-    from math import ceil
+    from math import ceil, floor
     array = list
     def zeros(size, dtype=int):
         if str(dtype).find('int') > -1:
@@ -34,15 +34,17 @@ class BitMap(object):
     def __repr__(self):
         return ''.join(['%02x ' % b for b in self.__byte_array__])
     def read(self, length):
-        start_byte = self.cursor // 8
+        start_byte = int(floor( self.cursor / 8 ))
         
-        byte_length = ((length + self.cursor) + 8 - ((length + self.cursor) % 8)) // 8
+        end_byte = int(ceil((self.cursor + length) / 8))
+
         value_length = int(ceil(length / 8.0))
 
-        bit_mask = sum([2**i for i in range(8 * (byte_length + start_byte) - self.cursor - 1, 8 * (byte_length + start_byte) - (self.cursor + length) - 1, -1)])
+        bit_mask = sum([2**(((end_byte - start_byte) * 8) - i - 1) for i in range(self.cursor % 8, self.cursor % 8 + length)])
+        bit_shift = (((end_byte - start_byte) * 8) - (self.cursor % 8 + int(length)))
 
-        value = ((int.from_bytes(self.__byte_array__[start_byte:start_byte+byte_length], 'big') & bit_mask) >> int(byte_length * 8 - length - (self.cursor - start_byte * 8))).to_bytes(value_length, 'big')
-        self.cursor += length
+        value = ((int.from_bytes(self.__byte_array__[start_byte:end_byte], 'big') & bit_mask) >> bit_shift).to_bytes(value_length, 'big')
+        self.cursor += int(length)
         return value
     @staticmethod
     def is_missing_value(value, length):
@@ -142,10 +144,10 @@ class BUFRMessage(object):
             self.__fobj__ = open(filename, 'rb')
         else:
             self.__fobj__ = filename
-        self.__table_a__ = Table('A', None, None, None)
-        self.__table_b__ = Table('B', None, None, None)
-        self.__table_d__ = Table('D', None, None, None)
-        self.__table_f__ = Table('F', None, None, None)
+        self.__table_a__ = Table.create('A', None, None, None)
+        self.__table_b__ = Table.create('B', None, None, None)
+        self.__table_d__ = Table.create('D', None, None, None)
+        self.__table_f__ = Table.create('F', None, None, None)
         self.__section_start__ = zeros(7, dtype='uint32')
         self.__section_start__[0] = file_offset
         start_word = self.__fobj__.read(4)

@@ -68,23 +68,13 @@ class BUFRString(BUFRValue):
         value += ((self.element.bit_width // 8) - len(value)) * b' '
         self.__bytes__ = value
 
-class BUFRCodeTable(BUFRValue):
-    __slots__ = '__codes__'
+class BUFRLookupTable(BUFRValue):
+    __slots__ = '__lookup_table__'
     def __init__(self, element, byte_string):
         super().__init__(element, byte_string)
-        self.__codes__ = None
-    def set_codes(self, codes):
-        self.__codes__ = dict([(x.code, x.meaning) for x in codes.values()])
-    @property
-    def data(self):
-        meaning = None
-        if not self.is_missing and self.__codes__ is not None:
-            meaning = self.__codes__.get(self.data_raw, meaning)
-        return meaning
-    @data.setter
-    def data(self, value):
-        code_switch = dict([(v, k) for k, v in self.__codes__.items()])
-        self.data_raw = code_switch.get(value, sum([2**i for i in range(self.element.bit_width)]))
+        self.__lookup_table__ = None
+    def set_lookup_table(self, codes):
+        self.__lookup_table__ = dict([(x.code, x.meaning) for x in codes.values()])
     @property
     def data_raw(self):
         return_value = None
@@ -95,33 +85,33 @@ class BUFRCodeTable(BUFRValue):
     def data_raw(self, value):
         self.__bytes__ = byte_integer(get_min_type(value - self.element.reference_value), self.element.bit_width)
 
-class BUFRFlagTable(BUFRValue):
-    __slots__ = '__flags__'
-    def __init__(self, element, byte_string):
-        super().__init__(element, byte_string)
-        self.__flags__ = None
-    def set_flags(self, flags):
-        self.__flags__ = dict([(1 << (self.element.bit_width - x.code), x.meaning) for x in flags.values()])
+class BUFRCodeTable(BUFRLookupTable):
+    @property
+    def data(self):
+        meaning = None
+        if not self.is_missing and self.__lookup_table__ is not None:
+            meaning = self.__lookup_table__.get(self.data_raw, meaning)
+        return meaning
+    @data.setter
+    def data(self, value):
+        code_switch = dict([(v, k) for k, v in self.__lookup_table__.items()])
+        self.data_raw = code_switch.get(value, sum([2**i for i in range(self.element.bit_width)]))
+
+
+class BUFRFlagTable(BUFRLookupTable):
+    def set_lookup_table(self, codes):
+        self.__lookup_table__ = dict([(1 << (self.element.bit_width - x.code), x.meaning) for x in codes.values()])
     @property
     def data(self):
         return_value = None
-        if not self.is_missing and self.__flags__ is not None:
+        if not self.is_missing and self.__lookup_table__ is not None:
             value = self.data_raw
-            return_value = [v for k, v in self.__flags__.items() if k & value > 0]
+            return_value = [v for k, v in self.__lookup_table__.items() if k & value > 0]
         return return_value
     @data.setter
     def data(self, value):
-        flag_switch = dict([(v, k) for k, v in self.__flags__.items()])
+        flag_switch = dict([(v, k) for k, v in self.__lookup_table__.items()])
         self.data_raw = sum([flag_switch.get(x, 0) for x in value])
-    @property
-    def data_raw(self):
-        return_value = None
-        if not self.is_missing:
-            return_value = get_min_type(self.element.reference_value + int.from_bytes(self.__bytes__, 'big'))
-        return return_value
-    @data_raw.setter
-    def data_raw(self, value):
-        self.__bytes__ = byte_integer(get_min_type(value - self.element.reference_value), self.element.bit_width)
 
 class BUFRList(list):
     pass

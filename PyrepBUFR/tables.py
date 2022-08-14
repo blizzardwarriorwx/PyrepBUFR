@@ -61,6 +61,9 @@ class BUFRTableObjectBase(object):
         value_format = lambda a: ('"{0}"' if type(a) == str else '{0}').format(a)
         return super().__repr__() if self.is_container else '{0:s}({1:s})'.format(self.__class__.__name__, ', '.join(['{0:s}={1:s}'.format(x, value_format(getattr(self, x, None))) for x in (list(self.id._fields) + list(self.__slots__[1:]))]))
     @property
+    def __element_name__(self):
+        return self.__class__.__name__
+    @property
     def is_container(self):
         return issubclass(self.__class__, dict)
     @staticmethod
@@ -75,7 +78,7 @@ class BUFRTableObjectBase(object):
         class_args.extend(args)
         return obj.__class__(*class_args, **kwargs)
     def to_element(self):
-        elm = ET.Element(self.__class__.__name__)
+        elm = ET.Element(self.__element_name__)
         slot_offset = 0
         if 'id' in self.__slots__:
             for attribute, value in self.id._asdict().items():
@@ -124,7 +127,7 @@ class BUFRTableContainerBase(dict):
         self.extend(b)
         return self
     def extend(self, item):
-        if self.__class__ == item.__class__:
+        if self.__element_name__ == item.__element_name__:
             self.update(item)
         else:
             self.append(item)
@@ -154,7 +157,7 @@ class TableCollection(BUFRTableObjectBase, BUFRTableContainerBase):
             [obj2dict(xml2class(child)) for child in elm]
         )
     def construct_table_version(self, table_type, table_version, master_table=None, originating_center=None):
-        table = Table(table_type, master_table, originating_center, table_version)
+        table = Table.create(table_type, master_table, originating_center, table_version)
         for table_content in sorted(self.find(lambda id: id.table_type==table_type and id.master_table==master_table and id.originating_center==originating_center and id.table_version>=table_version).values(), key=lambda a: a.id.table_version, reverse=True):
             for item in table_content.values():
                 if item.id in table and item.is_container:
@@ -168,6 +171,10 @@ class Table(BUFRTableObjectBase, BUFRTableContainerBase):
     __id_class__ = namedtuple('TableID', 
                               ('table_type', 'master_table', 'originating_center', 'table_version'),
                               defaults=(None, None, None, None))
+    @staticmethod
+    def create(table_type, master_table, originating_center, table_version, *args, **kwargs):
+        cls = getattr(modules[__name__], 'Table' + table_type.upper(), Table)
+        return cls(table_type, master_table, originating_center, table_version, *args, **kwargs)
     def __init__(self, table_type, master_table, originating_center, table_version, *args, **kwargs):
         super().__init__(*args, **kwargs)
         super().__initialize_id__(self.__id_class__(
@@ -176,9 +183,12 @@ class Table(BUFRTableObjectBase, BUFRTableContainerBase):
             originating_center=parse_int(originating_center, 2),
             table_version=parse_int(table_version, 1)
         ))
+    @property
+    def __element_name__(self):
+        return 'Table'
     @staticmethod
     def from_xml(elm):
-        return Table(
+        return Table.create(
             elm.attrib.get('table-type', None),
             elm.attrib.get('master-table', None),
             elm.attrib.get('originating-center', None),
@@ -194,6 +204,15 @@ class Table(BUFRTableObjectBase, BUFRTableContainerBase):
             if match:
                 match = min([self[key] == other[key] for key in self_keys]) and other.id == self.id
         return match
+
+class TableF(Table):
+    @property
+    def conditional_code_flags(self):
+        output_set = set()
+        for id in self:
+            if id.condition_f is not None and id.condition_x is not None and id.condition_y is not None and id.condition_value is not None:
+                output_set.update((ElementDefinition.__id_class__(id.condition_f, id.condition_x, id.condition_y),))
+        return list(sorted(output_set))
 
 class BUFRDataType(BUFRTableObjectBase):
     __slots__ = ('id', 'description')
@@ -396,7 +415,7 @@ class CodeFlagElement(BUFRTableObjectBase):
 def convert_wmo_table(filename):
     tree = ET.parse(filename)
     root = tree.getroot()
-    table = Table('A', 0, None, 0)
+    table = Table.create('A', 0, None, 0)
     for child in root:
         if child.tag == 'BUFR_TableA_en':
             kwargs = dict([(wmo_field_names[field.tag], field.text) for field in child if field.tag in wmo_field_names])
@@ -426,7 +445,7 @@ def convert_ncep_table(filename):
                         originating_center = None
                     elif len(id) == 3:
                         master_table, originating_center, table_version = id
-                    table = Table(table_type=table_type, master_table=master_table, originating_center=originating_center, table_version=table_version)
+                    table = Table.create(table_type=table_type, master_table=master_table, originating_center=originating_center, table_version=table_version)
                     if table.table_type == 'B':
                         convert_ncep_B_table(in_file, table)
                         break
