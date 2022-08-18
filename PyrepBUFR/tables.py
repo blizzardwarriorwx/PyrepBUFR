@@ -234,7 +234,7 @@ class BUFRDataType(BUFRTableObjectBase):
         return match
 
 class ElementDefinition(BUFRTableObjectBase):
-    __slots__ = 'id', 'scale', 'reference_value', 'bit_width', 'unit', 'mnemonic', 'desc_code', 'name'
+    __slots__ = ('id', 'scale', 'reference_value', 'bit_width', 'unit', 'mnemonic', 'desc_code', 'name')
     __id_class__ = namedtuple('ElementDefinitionID', ('f', 'x', 'y'))
 
     def __init__(self, f, x, y, scale, reference_value, bit_width, unit, mnemonic, desc_code, name):

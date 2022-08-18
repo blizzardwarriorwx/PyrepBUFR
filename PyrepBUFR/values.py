@@ -1,6 +1,14 @@
+from collections.abc import Sequence
+
 from .utility import byte_integer, ceil, get_min_type
 
-class BUFRValue(object):
+class BUFRValueBase(object):
+    __slots__ = ()
+    @property
+    def data(self):
+        return None
+
+class BUFRValue(BUFRValueBase):
     __slots__ = ('element', '__bytes__')
     @classmethod
     def create(cls, element):
@@ -69,7 +77,7 @@ class BUFRString(BUFRValue):
         self.__bytes__ = value
 
 class BUFRLookupTable(BUFRValue):
-    __slots__ = '__lookup_table__'
+    __slots__ = ('element', '__bytes__', '__lookup_table__')
     def __init__(self, element, byte_string):
         super().__init__(element, byte_string)
         self.__lookup_table__ = None
@@ -97,7 +105,6 @@ class BUFRCodeTable(BUFRLookupTable):
         code_switch = dict([(v, k) for k, v in self.__lookup_table__.items()])
         self.data_raw = code_switch.get(value, sum([2**i for i in range(self.element.bit_width)]))
 
-
 class BUFRFlagTable(BUFRLookupTable):
     def set_lookup_table(self, codes):
         self.__lookup_table__ = dict([(1 << (self.element.bit_width - x.code), x.meaning) for x in codes.values()])
@@ -113,5 +120,72 @@ class BUFRFlagTable(BUFRLookupTable):
         flag_switch = dict([(v, k) for k, v in self.__lookup_table__.items()])
         self.data_raw = sum([flag_switch.get(x, 0) for x in value])
 
-class BUFRList(list):
+class BUFRSequence(list):
+    __slots__ = ()
+    def __len__(self):
+        return sum([len(x) if issubclass(x.__class__, Sequence) else 1 for x in self])
+    def __iter__(self):
+        for x in super().__iter__():
+            if issubclass(x.__class__, BUFRSequence):
+                for y in x:
+                    yield y
+            else:
+                yield x
+    def __list_iter__(self):
+        for x in super().__iter__():
+            yield x
+    def __list_len__(self):
+        return super().__len__()
+    
+class BUFRGroup(BUFRSequence):
+    def __init__(self, *args):
+        if len(args) == 0:
+            args = [BUFRSequence()]
+        super().__init__(args)
+
+    def append(self, value):
+        if issubclass(value.__class__, BUFRSequence):
+            super().append(value)
+        else:
+            super().__getitem__(0).append(value)
+
+    @property
+    def groups(self):
+        return [x for x in super().__list_iter__()]
+
+    @property
+    def group_count(self):
+        return super().__list_len__()
+
+class BUFRSubset(BUFRGroup):
+    __slots__ = ('__conditional_values__', '__table_f__')
+    def __init__(self, table_f):
+        super().__init__()
+        self.__table_f__ = table_f
+        self.__conditional_values__ = dict([(id, None) for id in self.__table_f__.conditional_code_flags])
+    def process_value(self, value):
+        if issubclass(value.__class__, BUFRSequence):
+            for value_part in value:
+                self.process_value(value_part)
+        else:
+            value_id = (value.f, value.x, value.y)
+            if issubclass(value.__class__, BUFRLookupTable):
+                if value_id in self.__conditional_values__:
+                    self.__conditional_values__[value_id] = value.data_raw
+                code_flag = self.__table_f__.find(lambda id: id[0:3] == value_id and self.__conditional_values__.get((id.condition_f, id.condition_x, id.condition_y), None) == id.condition_value)
+                if len(code_flag) > 0:
+                    value.set_lookup_table(code_flag.iloc(0))
+            elif value_id in self.__conditional_values__:
+                self.__conditional_values__[value_id] = value.data
+    def append(self, value):
+        self.process_value(value)
+        super().append(value)
+
+class ReplicationGroup(BUFRValueBase, BUFRGroup):
+    __slots__ = ('element')
+    def __init__(self, element):
+        super().__init__()
+        self.element = element
+
+class ReplicationSequence(BUFRSequence):
     pass

@@ -1,8 +1,7 @@
-from collections import namedtuple
 from textwrap import wrap
 
-from .tables import ElementDefinition, read_xml, Table, parse_int
-from .values import BUFRList
+from .replication import Replication, DelayedReplication
+from .tables import read_xml, Table, parse_int
 from .utility import read_integer, read_integers
 
 DEBUG_LEVEL = 0
@@ -46,63 +45,6 @@ class BitMap(object):
         value = ((int.from_bytes(self.__byte_array__[start_byte:end_byte], 'big') & bit_mask) >> bit_shift).to_bytes(value_length, 'big')
         self.cursor += int(length)
         return value
-    @staticmethod
-    def is_missing_value(value, length):
-        return sum([2**i for i in range(length)]).to_bytes(len(value), 'big') == value
-
-class DelayedReplication(ElementDefinition):
-    __slots__ = ('id', 'mnemonic', 'name', 'replication_element', 'data_elements')
-    __id_class__ = namedtuple('DelayedReplicationID', ('f', 'x', 'y'))
-    def __init__(self, f, x, y, replication_element, data_elements):
-        super().__initialize_id__(self.__id_class__(
-            f=parse_int(f, 1), 
-            x=parse_int(x, 1), 
-            y=parse_int(y, 1)
-        ))
-        self.mnemonic = "DREPL"
-        self.name = 'Delayed Replication'
-        self.replication_element = replication_element
-        self.data_elements = data_elements
-    def __repr__(self):
-        base = super().__repr__()
-        return base[:base.find(', replication_element')] + ', \n    replication_element={0}, \n    data_elements=[\n        {1}\n    ]\n)'.format(repr(self.replication_element), ',\n        '.join([repr(x) for x in self.data_elements]))
-    def __str__(self):
-        return super().__str__() + '\n ' + '\n '.join([str(x) for x in self.data_elements])
-    def read_value(self, bit_map):
-        n = self.replication_element.read_value(bit_map)
-        output = BUFRList()
-        for i in range(n.data):
-            values = []
-            for element in self.data_elements:
-                values.append(element.read_value(bit_map))
-            output.append(values)
-        return output
-
-class Replication(ElementDefinition):
-    __slots__ = ('id', 'mnemonic', 'name', 'data_elements')
-    __id_class__ = namedtuple('ReplicationID', ('f', 'x', 'y'))
-    def __init__(self, f=None, x=None, y=None, data_elements=None):
-        super().__initialize_id__(self.__id_class__(
-            f=parse_int(f, 1), 
-            x=parse_int(x, 1), 
-            y=parse_int(y, 1)
-        ))
-        self.mnemonic = "REPL"
-        self.name = 'Replication'
-        self.data_elements = data_elements
-    def __repr__(self):
-        base = super().__repr__()
-        return base[:base.find(', data_elements')] + ', \n    replication_count={0}, \n    data_elements=[\n        {1}\n    ]\n)'.format(self.x, ',\n        '.join([repr(x) for x in self.data_elements]))
-    def __str__(self):
-        return super().__str__() + '\n ' + '\n '.join([str(x) for x in self.data_elements])
-    def read_value(self, bit_map):
-        output = BUFRList()
-        for i in range(self.x):
-            values = []
-            for element in self.data_elements:
-                values.append(element.read_value(bit_map))
-            output.append(values)
-        return output
 
 class BUFRFile(object):
     def __init__(self, filename, table_source=None):
@@ -472,7 +414,7 @@ class BUFRMessage(object):
                     expanded_descriptors.append(element)
             elif file_descriptor[0] == 1:
                 if file_descriptor[2] == 0:
-                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+1:i+2])[0], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2])))
+                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2]), self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
                     i += file_descriptor[1]+1
                 else:
                     expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
