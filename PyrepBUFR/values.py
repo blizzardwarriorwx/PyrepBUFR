@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from .utility import byte_integer, ceil, get_min_type
+from .utility import byte_integer, ceil, dict_merge, get_min_type
 
 class BUFRValueBase(object):
     __slots__ = ()
@@ -122,8 +122,10 @@ class BUFRFlagTable(BUFRLookupTable):
 
 class BUFRSequence(list):
     __slots__ = ()
+
     def __len__(self):
         return sum([len(x) if issubclass(x.__class__, Sequence) else 1 for x in self])
+
     def __iter__(self):
         for x in super().__iter__():
             if issubclass(x.__class__, BUFRSequence):
@@ -131,12 +133,17 @@ class BUFRSequence(list):
                     yield y
             else:
                 yield x
+
     def __list_iter__(self):
         for x in super().__iter__():
             yield x
+
     def __list_len__(self):
         return super().__len__()
-    
+
+    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None):
+        return dict([(key(x.element), x.data) for x in self.__list_iter__() if filter_keys is None or key(x.element) in filter_keys])
+
 class BUFRGroup(BUFRSequence):
     def __init__(self, *args):
         if len(args) == 0:
@@ -157,12 +164,26 @@ class BUFRGroup(BUFRSequence):
     def group_count(self):
         return super().__list_len__()
 
+    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None):
+        output = []
+        group_0 = self.groups[0].to_dict(key=key, filter_keys=filter_keys)
+        for y in self.groups[1:]:
+            if issubclass(y.__class__, BUFRGroup):
+                output.extend([dict_merge(group_0, x) for x in y.to_dict(key=key, filter_keys=filter_keys)])
+            else:
+                output.append(dict_merge(group_0, y.to_dict(key=key, filter_keys=filter_keys)))
+        if len(output) == 0:
+            output.append(group_0)
+        return output
+
 class BUFRSubset(BUFRGroup):
     __slots__ = ('__conditional_values__', '__table_f__')
+
     def __init__(self, table_f):
         super().__init__()
         self.__table_f__ = table_f
         self.__conditional_values__ = dict([(id, None) for id in self.__table_f__.conditional_code_flags])
+
     def process_value(self, value):
         if issubclass(value.__class__, BUFRSequence):
             for value_part in value:
@@ -177,6 +198,7 @@ class BUFRSubset(BUFRGroup):
                     value.set_lookup_table(code_flag.iloc(0))
             elif value_id in self.__conditional_values__:
                 self.__conditional_values__[value_id] = value.data
+
     def append(self, value):
         self.process_value(value)
         super().append(value)
