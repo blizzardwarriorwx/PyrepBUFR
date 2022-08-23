@@ -6,16 +6,11 @@ from typing import Any
 from xml.dom.minidom import parseString
 from xml.etree import ElementTree as ET, ElementInclude
 
+from .external import dtype, array
 from .values import *
 
-try:
-    from numpy import dtype, array
-    def parse_int(value, byte_width, big_endian=True, unsigned=True):
-        return dtype(('u' if unsigned else 'i') + str(byte_width)).type(value) if value is not None else None
-except ModuleNotFoundError:
-    array = list
-    def parse_int(value, byte_width, big_endian=True, unsigned=True):
-        return int(value) if value is not None else None
+def parse_int(value, byte_width, big_endian=True, unsigned=True):
+    return dtype(('u' if unsigned else 'i') + str(byte_width)).type(value) if value is not None else None
 
 wmo_field_names = {
     'CodeFigure': 'code',

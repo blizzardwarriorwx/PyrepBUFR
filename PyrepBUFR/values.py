@@ -1,6 +1,19 @@
 from collections.abc import Sequence
 
+from .external import DataFrame, Quantity, units
 from .utility import byte_integer, ceil, dict_merge, get_min_type
+
+unit_substituions = {
+    'Hour': 'hour',
+    'Minute': 'minute',
+    'Year': 'year',
+    'Month': 'month',
+    'Day': 'day',
+    'Degree': 'degree',
+    'Degree true': 'degree',
+    'gpm': 'meter',
+    '%': 'percent'
+}
 
 class BUFRValueBase(object):
     __slots__ = ()
@@ -44,6 +57,9 @@ class BUFRValue(BUFRValueBase):
         self.__bytes__ = sum([2**i for i in range(self.element.bit_width)]).to_bytes( int(ceil(self.element.bit_width / 8)) , 'big')
     def __repr__(self):
         return '{0:s} {1:s} {2}'.format(self.__class__.__name__, self.mnemonic, str(self.data))
+    @property
+    def unit(self):
+        return self.element.unit
 
 class BUFRNumeric(BUFRValue):
     @property
@@ -62,6 +78,10 @@ class BUFRNumeric(BUFRValue):
         else:
             value = int(round(value * 10.0**self.element.scale - self.element.reference_value))
         self.__bytes__ = byte_integer(get_min_type(value), self.element.bit_width)
+    @property
+    def unit(self):
+        unit = super().unit
+        return units(unit_substituions.get(unit, unit))
 
 class BUFRString(BUFRValue):
     @property
@@ -141,8 +161,25 @@ class BUFRSequence(list):
     def __list_len__(self):
         return super().__len__()
 
-    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None):
-        return dict([(key(x.element), x.data) for x in self.__list_iter__() if filter_keys is None or key(x.element) in filter_keys])
+    def value_record(self, key, filter_keys, use_pint, convert_units):
+        for item in self.__list_iter__():
+            key_value = key(item.element)
+            if filter_keys is None or key_value in filter_keys:
+                item_value = item.data
+                if not item.is_missing:
+                    if item.__class__ == BUFRNumeric and (use_pint or key_value in convert_units):
+                        item_value = Quantity(item_value, item.unit)
+                    if key_value in convert_units:
+                        item_value = item_value.to(convert_units[key_value])
+                    if item_value.__class__ == Quantity and not use_pint:
+                        item_value = item_value.magnitude
+                yield (key_value, item_value)
+
+    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
+        return dict(self.value_record(key, filter_keys, use_pint, convert_units))
+
+    def to_dataframe(self, key=lambda element: element.mnemonic, filter_keys=None, convert_units={}):
+        return DataFrame(self.to_dict(key=key, filter_keys=filter_keys, use_pint=False, convert_units=convert_units))
 
 class BUFRGroup(BUFRSequence):
     def __init__(self, *args):
@@ -164,14 +201,14 @@ class BUFRGroup(BUFRSequence):
     def group_count(self):
         return super().__list_len__()
 
-    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None):
+    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
         output = []
         group_0 = self.groups[0].to_dict(key=key, filter_keys=filter_keys)
         for y in self.groups[1:]:
             if issubclass(y.__class__, BUFRGroup):
-                output.extend([dict_merge(group_0, x) for x in y.to_dict(key=key, filter_keys=filter_keys)])
+                output.extend([dict_merge(group_0, x) for x in y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)])
             else:
-                output.append(dict_merge(group_0, y.to_dict(key=key, filter_keys=filter_keys)))
+                output.append(dict_merge(group_0, y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)))
         if len(output) == 0:
             output.append(group_0)
         return output

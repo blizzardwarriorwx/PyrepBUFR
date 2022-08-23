@@ -1,22 +1,11 @@
 from textwrap import wrap
 
+from .external import array, ceil, zeros, floor
 from .replication import Replication, DelayedReplication
 from .tables import read_xml, Table, parse_int
 from .utility import read_integer, read_integers
 
 DEBUG_LEVEL = 0
-
-try:
-    from numpy import array, ceil, zeros, floor
-except ModuleNotFoundError:
-    from math import ceil, floor
-    array = list
-    def zeros(size, dtype=int):
-        if str(dtype).find('int') > -1:
-            dtype = int
-        else:
-            dtype = float
-        return [dtype(0) for i in range(size)]
 
 class InvalidBUFRMessage(Exception):
     pass
