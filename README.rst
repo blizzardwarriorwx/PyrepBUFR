@@ -9,23 +9,28 @@ Prequisites
 
 None outside of the Python standard packages
  - collections
+ - collections.abc
  - copy
  - math
+ - re
  - sys
  - typing
  - textwrap
- - xml
-   - dom
-   - etree
-Numpy will be used if present.
+ - xml.dom
+ - xml.etree
+
+Optional, will be used if present
+ - numpy
+ - pandas, for optional DataFrame creation
+ - pint, for optional unit conversion
 
 Description
 -----------
 
-Currently under construction in a pre-alpha state
+Currently under construction in a pre-alpha state, API is highly unstable
 
 :Authors:
     Nickolai Reimer
 
 :Version:
-    Pre-Alpha 1
+    Pre-Alpha 2
