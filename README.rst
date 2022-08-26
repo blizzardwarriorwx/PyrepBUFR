@@ -8,6 +8,7 @@ Prequisites
 -----------
 
 None outside of the Python standard packages
+
  - collections
  - collections.abc
  - copy
@@ -20,6 +21,7 @@ None outside of the Python standard packages
  - xml.etree
 
 Optional, will be used if present
+
  - numpy
  - pandas, for optional DataFrame creation
  - pint, for optional unit conversion

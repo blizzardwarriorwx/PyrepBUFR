@@ -56,7 +56,7 @@ class BUFRValue(BUFRValueBase):
     def set_missing(self):
         self.__bytes__ = sum([2**i for i in range(self.element.bit_width)]).to_bytes( int(ceil(self.element.bit_width / 8)) , 'big')
     def __repr__(self):
-        return '{0:s} {1:s} {2}'.format(self.__class__.__name__, self.mnemonic, str(self.data))
+        return '{0:s} {1:s} {2}'.format(self.__class__.__name__, self.mnemonic, str(self.data).replace('\n', '\\n'))
     @property
     def unit(self):
         return self.element.unit

@@ -1,6 +1,8 @@
 from textwrap import wrap
 
+from .debug import dump_hex
 from .external import array, ceil, zeros, floor
+from .operators import Operator
 from .replication import Replication, DelayedReplication
 from .tables import read_xml, Table, parse_int
 from .utility import read_integer, read_integers
@@ -20,7 +22,7 @@ class BitMap(object):
     def seek(self, position):
         self.cursor = position
     def __repr__(self):
-        return ''.join(['%02x ' % b for b in self.__byte_array__])
+        return dump_hex(self.__byte_array__, 1e45)
     def read(self, length):
         start_byte = int(floor( self.cursor / 8 ))
         
@@ -65,7 +67,38 @@ class BUFRFile(object):
     def close(self):
         self.__fobj__.close()
 
-class BUFRMessage(object):
+class BUFRMessageBase(object):
+    def expand_descriptors(self, file_descriptors):
+        expanded_descriptors = []
+        number_of_descriptors = len(file_descriptors)
+        i = 0
+        
+        while i < number_of_descriptors:
+            file_descriptor = file_descriptors[i]
+            if file_descriptor[0] == 0:
+                element = self.__table_b__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
+                if not element.is_empty:
+                    element = element.iloc(0)
+                    expanded_descriptors.append(element)
+            elif file_descriptor[0] == 1:
+                if file_descriptor[2] == 0:
+                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2]), self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
+                    i += file_descriptor[1]+1
+                else:
+                    expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
+                    i += file_descriptor[1]
+            elif file_descriptor[0] == 2:
+                # print('Operator Found ({0:01d}-{1:02d}-{2:03d})'.format(*file_descriptor))
+                expanded_descriptors.append(Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2]))
+            elif file_descriptor[0] == 3:
+                sequence = self.__table_d__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
+                if not sequence.is_empty:
+                    sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
+                    expanded_descriptors.extend(sequence)
+            i += 1
+        return expanded_descriptors
+
+class BUFRMessage(BUFRMessageBase):
     def __init__(self, filename, table_source=None, file_offset=0):
         if table_source is None:
             self.__table_source__ = read_xml('tables.xml')
@@ -115,7 +148,7 @@ class BUFRMessage(object):
         self.__fobj__.seek(self.__section_start__[3])
         self.__section_start__[4] = self.__section_start__[3] + read_integer(b'\x00' + self.__fobj__.read(3))
         self.__fobj__.seek(self.__section_start__[4])
-        self.__section_start__[5] = self.__section_start__[4] + read_integer(b'\x00' + self.__fobj__.read(3))
+        self.__section_start__[5] = self.__section_start__[4] + read_integer(b'\x00' + self.__fobj__.read(3)) - 4
         if DEBUG_LEVEL > 1:
             print('Initializing Table A')
         for table in (self.__table_source__.construct_table_version('A', 0, master_table=self.bufr_master_table)
@@ -386,37 +419,8 @@ class BUFRMessage(object):
         if self.__fobj__.closed:
             raise ClosedBUFRFile('File already closed.')
         self.__fobj__.seek(self.__section_start__[4] + 4)
-        end = self.__section_start__[5] - self.__section_start__[4] - 4
+        end = self.__section_start__[5] - self.__section_start__[4]
         return BitMap(self.__fobj__.read(end))
-
-    def expand_descriptors(self, file_descriptors):
-        expanded_descriptors = []
-        number_of_descriptors = len(file_descriptors)
-        i = 0
-        
-        while i < number_of_descriptors:
-            file_descriptor = file_descriptors[i]
-            if file_descriptor[0] == 0:
-                element = self.__table_b__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
-                if not element.is_empty:
-                    element = element.iloc(0)
-                    expanded_descriptors.append(element)
-            elif file_descriptor[0] == 1:
-                if file_descriptor[2] == 0:
-                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2]), self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
-                    i += file_descriptor[1]+1
-                else:
-                    expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
-                    i += file_descriptor[1]
-            elif file_descriptor[0] == 2:
-                print('Operator Found')
-            elif file_descriptor[0] == 3:
-                sequence = self.__table_d__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
-                if not sequence.is_empty:
-                    sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
-                    expanded_descriptors.extend(sequence)
-            i += 1
-        return expanded_descriptors
 
     def __str__(self):
         description = [
