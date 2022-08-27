@@ -1,4 +1,5 @@
 from collections import namedtuple
+from copy import deepcopy
 from sys import modules
 
 from .tables import ElementDefinition, parse_int
@@ -28,3 +29,12 @@ class Operator05(Operator):
     @property
     def bit_width(self):
         return self.id.y * 8
+
+class Operator06(Operator):
+    mnemonic = "OPER6"
+    name = 'Operator06'
+    
+    def apply(self, element):
+        element = deepcopy(element)
+        element.bit_width *= self.y
+        return element

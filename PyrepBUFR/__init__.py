@@ -88,13 +88,22 @@ class BUFRMessageBase(object):
                     expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
                     i += file_descriptor[1]
             elif file_descriptor[0] == 2:
-                # print('Operator Found ({0:01d}-{1:02d}-{2:03d})'.format(*file_descriptor))
-                expanded_descriptors.append(Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2]))
+                if file_descriptor[1] == 5:
+                    expanded_descriptors.append(Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2]))
+                elif file_descriptor[1] == 6:
+                    operator = Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2])
+                    expanded_descriptors.append(operator.apply(self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
+                    i += 1
             elif file_descriptor[0] == 3:
                 sequence = self.__table_d__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
                 if not sequence.is_empty:
-                    sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
-                    expanded_descriptors.extend(sequence)
+                    if sequence.iloc(0).mnemonic in ['DRP16BIT', 'DRP8BIT', 'DRP1BIT', 'DRPSTAK']:
+                        delayed_replication_sequence = sequence.iloc(0).get_descriptors()
+                        expanded_descriptors.append(DelayedReplication(delayed_replication_sequence[0][0], delayed_replication_sequence[0][1], delayed_replication_sequence[0][2], self.expand_descriptors(file_descriptors[i+1:i+delayed_replication_sequence[0][1]+1]), self.expand_descriptors(delayed_replication_sequence[1:2])[0]))
+                        i += delayed_replication_sequence[0][1]
+                    else:
+                        sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
+                        expanded_descriptors.extend(sequence)
             i += 1
         return expanded_descriptors
 
