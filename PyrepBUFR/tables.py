@@ -161,6 +161,16 @@ class TableCollection(BUFRTableObjectBase, BUFRTableContainerBase):
                     table.extend(item)
         return table
 
+    def dynamic_table(self, table_type):
+        table_type = '{0:s}X'.format(table_type)
+        tables = self.find(lambda id: id.table_type==table_type and id.master_table==None and id.originating_center==None and id.table_version>=0)
+        if not tables.is_empty:
+            table = tables.iloc(0)
+        else:
+            table = Table.create(table_type, None, None, 1e3)
+            self.append(table)
+        return table
+
 class Table(BUFRTableObjectBase, BUFRTableContainerBase):
     __slots__ = ('id',)
     __id_class__ = namedtuple('TableID', 

@@ -29,10 +29,10 @@ Optional, will be used if present
 Description
 -----------
 
-Currently under construction in a pre-alpha state, API is highly unstable
+Currently under construction in a alpha state, API is unstable
 
 :Authors:
     Nickolai Reimer
 
 :Version:
-    Pre-Alpha 2
+    Alpha 1

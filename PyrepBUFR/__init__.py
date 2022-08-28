@@ -1,10 +1,11 @@
+from re import search
 from textwrap import wrap
 
 from .debug import dump_hex
 from .external import array, ceil, zeros, floor
 from .operators import Operator
 from .replication import Replication, DelayedReplication
-from .tables import read_xml, Table, parse_int
+from .tables import BUFRDataType, ElementDefinition, parse_int, read_xml, Table, SequenceDefinition, SequenceElement
 from .utility import read_integer, read_integers
 
 DEBUG_LEVEL = 0
@@ -54,7 +55,10 @@ class BUFRFile(object):
             try:
                 message = BUFRMessage(self.__fobj__, table_source=self.__table_source__, file_offset=message_offset)
                 message_offset = message.__section_start__[0] + message.__section_start__[6]
-                self.messages.append(message)
+                if message.data_category == 11:
+                    self.__process_prepbufr_table__(message)
+                else:
+                    self.messages.append(message)
             except InvalidBUFRMessage:
                 continue_reading = False
         if len(self.messages) == 0:
@@ -64,6 +68,59 @@ class BUFRFile(object):
         for i, message in enumerate(self.messages):
             output +=  '\n\n' + '*'* 50 + '\n*' + ' ' * 48 + '*\n*' + '{0: ^48s}'.format('Message {0:d}'.format(i)) + '*\n*' + ' ' * 48 + '*\n' + '*' * 50 + '\n\n' + str(message)
         return output
+
+    def __process_prepbufr_table__(self, message):
+        table_ax = self.__table_source__.dynamic_table('A')
+        table_bx = self.__table_source__.dynamic_table('B')
+        table_dx = self.__table_source__.dynamic_table('D')
+        message_descriptors = message.expand_descriptors(message.data_descriptors)
+        message_bitmap      = message.section_4_data_bytes
+        for i in range(len(message_descriptors)):
+            value = message_descriptors[i].read_value(message_bitmap)
+            for k in range(1, value.group_count):
+                if value.groups[k][0].mnemonic == 'TABLAE':
+                    table_ax.append(self.__parse_table_a_entry__(*value.groups[k]))
+                elif value.groups[k][0].mnemonic == 'FDESC' and value.groups[k][3].mnemonic == 'ELEMNA1':
+                    try:
+                        table_bx.append(self.__parse_table_b_entry__(*value.groups[k]))
+                    except:
+                        print(value.groups[k])
+                elif value.groups[k][0].mnemonic == 'FDESC' and value.groups[k][3].mnemonic == 'OPER5':
+                    table_dx.append(self.__parse_table_d_entry__(*value.groups[k]))
+
+    def __parse_table_a_entry__(self, table_a_entry, table_a_description_1, table_a_description_2):
+        return_value = None
+        description = table_a_description_1.data_raw + table_a_description_2.data_raw
+        match = search(r'([^\s]+)\s+(.*)', description)
+        if match is not None:
+            return_value = BUFRDataType(table_a_entry.data, match.group(2).strip())
+        return return_value
+
+    def __parse_table_b_entry__(self, f_descriptor, x_descriptor, y_descriptor,
+                            element_name_1, element_name_2, units_name,
+                            scale_sign, scale, reference_sign, reference,
+                            element_data_width):
+        element = None
+        element_information = element_name_1.data + element_name_2.data_raw
+        match = search(r'([\w\d]+)(?:[\s\.]+([^\n]+))?', element_information)
+        if match is not None:
+            element = ElementDefinition(f_descriptor.data, x_descriptor.data, y_descriptor.data,
+                                        scale_sign.data.strip() + scale.data.strip(), 
+                                        reference_sign.data.strip() + reference.data.strip(),
+                                        element_data_width.data, units_name.data.strip(), match.group(1).strip(), '', match.group(2).strip())
+        return element
+
+    def __parse_table_d_entry__(self, f_descriptor, x_descriptor, y_descriptor,
+                            sequence_name, *sequence_descriptors):
+        element = None
+        match = search(r'([\w\d]+)(?:[\s]+([^\n]+))?', sequence_name.data_raw)
+        if match is not None:
+            element = SequenceDefinition(f_descriptor.data, x_descriptor.data, y_descriptor.data,
+                match.group(1).strip(), '', match.group(2).strip())
+            for index, entry in enumerate(sequence_descriptors):
+                element.append(SequenceElement(index, entry.data[0],entry.data[1:3],entry.data[3:], ''))
+        return element
+
     def close(self):
         self.__fobj__.close()
 

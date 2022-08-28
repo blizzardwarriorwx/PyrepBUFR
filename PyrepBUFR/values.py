@@ -12,7 +12,8 @@ unit_substituions = {
     'Degree': 'degree',
     'Degree true': 'degree',
     'gpm': 'meter',
-    '%': 'percent'
+    '%': 'percent',
+    'PA': 'Pa'
 }
 
 class BUFRValueBase(object):
@@ -88,13 +89,19 @@ class BUFRString(BUFRValue):
     def data(self):
         return_value = None
         if not self.is_missing:
-            return_value = self.__bytes__.decode('utf-8').split('\x00')[0]
+            return_value = self.__bytes__.decode('utf-8').split('\x00')[0].strip()
         return return_value
     @data.setter
     def data(self, value):
         value = value.encode('ascii') + b'\x00'
         value += ((self.element.bit_width // 8) - len(value)) * b' '
         self.__bytes__ = value
+    @property
+    def data_raw(self):
+        return_value = None
+        if not self.is_missing:
+            return_value = self.__bytes__.decode('utf-8').split('\x00')[0]
+        return return_value
 
 class BUFRLookupTable(BUFRValue):
     __slots__ = ('element', '__bytes__', '__lookup_table__')
@@ -203,7 +210,7 @@ class BUFRGroup(BUFRSequence):
 
     def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
         output = []
-        group_0 = self.groups[0].to_dict(key=key, filter_keys=filter_keys)
+        group_0 = self.groups[0].to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)
         for y in self.groups[1:]:
             if issubclass(y.__class__, BUFRGroup):
                 output.extend([dict_merge(group_0, x) for x in y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)])
