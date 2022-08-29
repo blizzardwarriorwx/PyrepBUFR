@@ -35,4 +35,4 @@ Currently under construction in a alpha state, API is unstable
     Nickolai Reimer
 
 :Version:
-    Alpha 1
+    Alpha 2
