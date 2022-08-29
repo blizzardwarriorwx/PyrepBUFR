@@ -188,7 +188,26 @@ class BUFRSequence(list):
     def to_dataframe(self, key=lambda element: element.mnemonic, filter_keys=None, convert_units={}):
         return DataFrame(self.to_dict(key=key, filter_keys=filter_keys, use_pint=False, convert_units=convert_units))
 
-class BUFRGroup(BUFRSequence):
+class BUFRSequenceCollection(BUFRSequence):
+    def __group_0__(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
+        return {}
+
+    def __parts__(self):
+        return []
+
+    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
+        output = []
+        group_0 = self.__group_0__(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)
+        for y in self.__parts__():
+            if issubclass(y.__class__, BUFRSequenceCollection):
+                output.extend([dict_merge(group_0, x) for x in y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)])
+            else:
+                output.append(dict_merge(group_0, y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)))
+        if len(output) == 0:
+            output.append(group_0)
+        return output
+
+class BUFRGroup(BUFRSequenceCollection):
     def __init__(self, *args):
         if len(args) == 0:
             args = [BUFRSequence()]
@@ -208,25 +227,20 @@ class BUFRGroup(BUFRSequence):
     def group_count(self):
         return super().__list_len__()
 
-    def to_dict(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
-        output = []
-        group_0 = self.groups[0].to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)
-        for y in self.groups[1:]:
-            if issubclass(y.__class__, BUFRGroup):
-                output.extend([dict_merge(group_0, x) for x in y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)])
-            else:
-                output.append(dict_merge(group_0, y.to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)))
-        if len(output) == 0:
-            output.append(group_0)
-        return output
+    def __group_0__(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
+        return self.groups[0].to_dict(key=key, filter_keys=filter_keys, use_pint=use_pint, convert_units=convert_units)
+
+    def __parts__(self):
+        return self.groups[1:]
 
 class BUFRSubset(BUFRGroup):
-    __slots__ = ('__conditional_values__', '__table_f__')
+    __slots__ = ('__conditional_values__', '__table_f__', 'metadata')
 
     def __init__(self, table_f):
         super().__init__()
         self.__table_f__ = table_f
         self.__conditional_values__ = dict([(id, None) for id in self.__table_f__.conditional_code_flags])
+        self.metadata = {}
 
     def process_value(self, value):
         if issubclass(value.__class__, BUFRSequence):
@@ -247,6 +261,9 @@ class BUFRSubset(BUFRGroup):
         self.process_value(value)
         super().append(value)
 
+    def __group_0__(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
+        return dict([(k, v) for k, v in self.metadata.items() if filter_keys is None or k in filter_keys] + list(super().__group_0__(key, filter_keys, use_pint, convert_units).items()))
+
 class ReplicationGroup(BUFRValueBase, BUFRGroup):
     __slots__ = ('element')
     def __init__(self, element):
@@ -254,4 +271,23 @@ class ReplicationGroup(BUFRValueBase, BUFRGroup):
         self.element = element
 
 class ReplicationSequence(BUFRSequence):
+    pass
+
+class MetadataCollection(BUFRSequenceCollection):
+    __slots__ = ('metadata')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.metadata = {}
+
+    def __group_0__(self, key=lambda element: element.mnemonic, filter_keys=None, use_pint=False, convert_units={}):
+        return dict([(k, v) for k, v in self.metadata.items() if filter_keys is None or k in filter_keys])
+
+    def __parts__(self):
+        return self.__list_iter__()
+
+class SubsetCollection(MetadataCollection):
+    pass
+
+class MessageCollection(MetadataCollection):
     pass

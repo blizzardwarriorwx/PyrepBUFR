@@ -6,6 +6,7 @@ from .external import array, ceil, zeros, floor
 from .operators import Operator
 from .replication import Replication, DelayedReplication
 from .tables import BUFRDataType, ElementDefinition, parse_int, read_xml, Table, SequenceDefinition, SequenceElement
+from .values import BUFRSubset, SubsetCollection, MessageCollection
 from .utility import read_integer, read_integers
 
 DEBUG_LEVEL = 0
@@ -121,50 +122,25 @@ class BUFRFile(object):
                 element.append(SequenceElement(index, entry.data[0],entry.data[1:3],entry.data[3:], ''))
         return element
 
+    @property
+    def data(self):
+        message_collection = MessageCollection()
+        for message_number, message in enumerate(self.messages):
+            subsets = message.subsets
+            subsets.metadata['message_number'] = message_number
+            subsets.metadata['nominal_year'] = message.file_year
+            subsets.metadata['nominal_month'] = message.file_month
+            subsets.metadata['nominal_day'] = message.file_day
+            subsets.metadata['nominal_hour'] = message.file_hour
+            subsets.metadata['nominal_minute'] = message.file_minute
+            subsets.metadata['nominal_second'] = message.file_second
+            message_collection.append(subsets)
+        return message_collection
+
     def close(self):
         self.__fobj__.close()
 
-class BUFRMessageBase(object):
-    def expand_descriptors(self, file_descriptors):
-        expanded_descriptors = []
-        number_of_descriptors = len(file_descriptors)
-        i = 0
-        
-        while i < number_of_descriptors:
-            file_descriptor = file_descriptors[i]
-            if file_descriptor[0] == 0:
-                element = self.__table_b__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
-                if not element.is_empty:
-                    element = element.iloc(0)
-                    expanded_descriptors.append(element)
-            elif file_descriptor[0] == 1:
-                if file_descriptor[2] == 0:
-                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2]), self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
-                    i += file_descriptor[1]+1
-                else:
-                    expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
-                    i += file_descriptor[1]
-            elif file_descriptor[0] == 2:
-                if file_descriptor[1] == 5:
-                    expanded_descriptors.append(Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2]))
-                elif file_descriptor[1] == 6:
-                    operator = Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2])
-                    expanded_descriptors.append(operator.apply(self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
-                    i += 1
-            elif file_descriptor[0] == 3:
-                sequence = self.__table_d__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
-                if not sequence.is_empty:
-                    if sequence.iloc(0).mnemonic in ['DRP16BIT', 'DRP8BIT', 'DRP1BIT', 'DRPSTAK']:
-                        delayed_replication_sequence = sequence.iloc(0).get_descriptors()
-                        expanded_descriptors.append(DelayedReplication(delayed_replication_sequence[0][0], delayed_replication_sequence[0][1], delayed_replication_sequence[0][2], self.expand_descriptors(file_descriptors[i+1:i+delayed_replication_sequence[0][1]+1]), self.expand_descriptors(delayed_replication_sequence[1:2])[0]))
-                        i += delayed_replication_sequence[0][1]
-                    else:
-                        sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
-                        expanded_descriptors.extend(sequence)
-            i += 1
-        return expanded_descriptors
-
-class BUFRMessage(BUFRMessageBase):
+class BUFRMessage(object):
     def __init__(self, filename, table_source=None, file_offset=0):
         if table_source is None:
             self.__table_source__ = read_xml('tables.xml')
@@ -375,7 +351,8 @@ class BUFRMessage(BUFRMessageBase):
             year = read_integer(self.__fobj__.read(1))
         elif self.bufr_edition == 4:
             year = read_integer(self.__fobj__.read(2))
-        return year
+        return year if year > 1500 else (2000 + year if year < 70 else 1900 + year)
+
     @property
     def file_month(self):
         if self.__fobj__.closed:
@@ -487,6 +464,61 @@ class BUFRMessage(BUFRMessageBase):
         self.__fobj__.seek(self.__section_start__[4] + 4)
         end = self.__section_start__[5] - self.__section_start__[4]
         return BitMap(self.__fobj__.read(end))
+
+    def expand_descriptors(self, file_descriptors):
+        expanded_descriptors = []
+        number_of_descriptors = len(file_descriptors)
+        i = 0
+        
+        while i < number_of_descriptors:
+            file_descriptor = file_descriptors[i]
+            if file_descriptor[0] == 0:
+                element = self.__table_b__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
+                if not element.is_empty:
+                    element = element.iloc(0)
+                    expanded_descriptors.append(element)
+            elif file_descriptor[0] == 1:
+                if file_descriptor[2] == 0:
+                    expanded_descriptors.append(DelayedReplication(file_descriptor[0], file_descriptor[1], file_descriptor[2], self.expand_descriptors(file_descriptors[i+2:i+file_descriptor[1]+2]), self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
+                    i += file_descriptor[1]+1
+                else:
+                    expanded_descriptors.append(Replication(file_descriptor[0], file_descriptor[1], file_descriptor[2], data_elements=self.expand_descriptors(file_descriptors[i+1:i+file_descriptor[1]+1])))
+                    i += file_descriptor[1]
+            elif file_descriptor[0] == 2:
+                if file_descriptor[1] == 5:
+                    expanded_descriptors.append(Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2]))
+                elif file_descriptor[1] == 6:
+                    operator = Operator.create(file_descriptor[0], file_descriptor[1], file_descriptor[2])
+                    expanded_descriptors.append(operator.apply(self.expand_descriptors(file_descriptors[i+1:i+2])[0]))
+                    i += 1
+            elif file_descriptor[0] == 3:
+                sequence = self.__table_d__.find(lambda id: id.f==file_descriptor[0] and id.x==file_descriptor[1] and id.y==file_descriptor[2])
+                if not sequence.is_empty:
+                    if sequence.iloc(0).mnemonic in ['DRP16BIT', 'DRP8BIT', 'DRP1BIT', 'DRPSTAK']:
+                        delayed_replication_sequence = sequence.iloc(0).get_descriptors()
+                        expanded_descriptors.append(DelayedReplication(delayed_replication_sequence[0][0], delayed_replication_sequence[0][1], delayed_replication_sequence[0][2], self.expand_descriptors(file_descriptors[i+1:i+delayed_replication_sequence[0][1]+1]), self.expand_descriptors(delayed_replication_sequence[1:2])[0]))
+                        i += delayed_replication_sequence[0][1]
+                    else:
+                        sequence = self.expand_descriptors(sequence.iloc(0).get_descriptors())
+                        expanded_descriptors.extend(sequence)
+            i += 1
+        return expanded_descriptors
+
+    @property
+    def subsets(self):
+        message_bitmap = self.section_4_data_bytes
+        descriptors = self.expand_descriptors(self.data_descriptors)
+        
+        subsets_collection = SubsetCollection()
+
+        for subset_number in range(self.number_of_subsets):
+            subset = BUFRSubset(self.__table_f__)
+            subset.metadata['subset_number'] = subset_number
+            for i in range(len(descriptors)):
+                value = descriptors[i].read_value(message_bitmap)
+                subset.append(value)
+            subsets_collection.append(subset)
+        return subsets_collection
 
     def __str__(self):
         description = [
