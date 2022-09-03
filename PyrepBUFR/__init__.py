@@ -108,7 +108,7 @@ class BUFRFile(object):
             element = ElementDefinition(f_descriptor.data, x_descriptor.data, y_descriptor.data,
                                         scale_sign.data.strip() + scale.data.strip(), 
                                         reference_sign.data.strip() + reference.data.strip(),
-                                        element_data_width.data, units_name.data.strip(), match.group(1).strip(), '', match.group(2).strip())
+                                        element_data_width.data, units_name.data.strip(), match.group(1).strip(), match.group(2).strip())
         return element
 
     def __parse_table_d_entry__(self, f_descriptor, x_descriptor, y_descriptor,
@@ -117,7 +117,7 @@ class BUFRFile(object):
         match = search(r'([\w\d]+)(?:[\s]+([^\n]+))?', sequence_name.data_raw)
         if match is not None:
             element = SequenceDefinition(f_descriptor.data, x_descriptor.data, y_descriptor.data,
-                match.group(1).strip(), '', match.group(2).strip())
+                match.group(1).strip(), match.group(2).strip())
             for index, entry in enumerate(sequence_descriptors):
                 element.append(SequenceElement(index, entry.data[0],entry.data[1:3],entry.data[3:], ''))
         return element

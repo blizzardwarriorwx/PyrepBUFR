@@ -17,7 +17,9 @@ wmo_field_names = {
     'Meaning_en': 'meaning'
 }
 
-def obj2dict(obj):
+def obj2dict(obj, element_class):
+    if obj.__element_name__ not in element_class.__child_types__:
+        raise ValueError('Type "{0}" cannot be added to type "{1}"'.format(obj.__element_name__, element_class.__name__))
     return (obj.id, obj)
 
 def xml2class(node: ET.Element) -> Any:
@@ -111,11 +113,12 @@ class BUFRTableObjectBase(object):
     def __deepcopy__(self, memo):
         class_args = list(self.id) + [getattr(self, x, None) for x in  self.__slots__[1:]] 
         if self.is_container:
-            class_args += [[obj2dict(deepcopy(value)) for value in self.values()]]
+            class_args += [[obj2dict(deepcopy(value), self.__class__) for value in self.values()]]
         return self.__class__(*class_args)
 
 class BUFRTableContainerBase(dict):
     __slots__ = ()
+    __child_types__ = ()
     def __hash__(self):
         return hash(self.id)
     def __add__(self, b):
@@ -124,9 +127,13 @@ class BUFRTableContainerBase(dict):
     def extend(self, item):
         if self.__element_name__ == item.__element_name__:
             self.update(item)
-        else:
+        elif item.__element_name__ in self.__child_types__:
             self.append(item)
+        else:
+            raise ValueError('Type "{0:s}" cannot be added to type "{1:s}"'.format(item.__element_name__, self.__element_name__))
     def append(self, item):
+        if item.__element_name__ not in self.__child_types__:
+            raise ValueError('Type "{0:s}" cannot be added to type "{1:s}"'.format(item.__element_name__, self.__element_name__))
         self[item.id] = item
     def iloc(self, index):
         return self[sorted(self.keys())[index]]
@@ -137,6 +144,7 @@ class BUFRTableContainerBase(dict):
         return len(self) == 0
 
 class TableCollection(BUFRTableObjectBase, BUFRTableContainerBase):
+    __child_types__ = ('Table', )
     def __eq__(self, other):
         match = super().__eq__(other)
         if match:
@@ -149,7 +157,7 @@ class TableCollection(BUFRTableObjectBase, BUFRTableContainerBase):
     @staticmethod
     def from_xml(elm):
         return TableCollection(
-            [obj2dict(xml2class(child)) for child in elm]
+            [obj2dict(xml2class(child), TableCollection) for child in elm]
         )
     def construct_table_version(self, table_type, table_version, master_table=None, originating_center=None):
         table = Table.create(table_type, master_table, originating_center, table_version)
@@ -176,6 +184,7 @@ class Table(BUFRTableObjectBase, BUFRTableContainerBase):
     __id_class__ = namedtuple('TableID', 
                               ('table_type', 'master_table', 'originating_center', 'table_version'),
                               defaults=(None, None, None, None))
+    __child_types__ = ('BUFRDataType', 'CodeFlagDefinition', 'ElementDefinition', 'SequenceDefinition')
     @staticmethod
     def create(table_type, master_table, originating_center, table_version, *args, **kwargs):
         cls = getattr(modules[__name__], 'Table' + table_type.upper(), Table)
@@ -198,7 +207,7 @@ class Table(BUFRTableObjectBase, BUFRTableContainerBase):
             elm.attrib.get('master-table', None),
             elm.attrib.get('originating-center', None),
             elm.attrib.get('table-version', None),
-            [obj2dict(xml2class(child)) for child in elm]
+            [obj2dict(xml2class(child), Table) for child in elm]
         )
     def __eq__(self, other):
         match = super().__eq__(other)
@@ -239,10 +248,10 @@ class BUFRDataType(BUFRTableObjectBase):
         return match
 
 class ElementDefinition(BUFRTableObjectBase):
-    __slots__ = ('id', 'scale', 'reference_value', 'bit_width', 'unit', 'mnemonic', 'desc_code', 'name')
+    __slots__ = ('id', 'scale', 'reference_value', 'bit_width', 'unit', 'mnemonic', 'name')
     __id_class__ = namedtuple('ElementDefinitionID', ('f', 'x', 'y'))
 
-    def __init__(self, f, x, y, scale, reference_value, bit_width, unit, mnemonic, desc_code, name):
+    def __init__(self, f, x, y, scale, reference_value, bit_width, unit, mnemonic, name):
         super().__initialize_id__(self.__id_class__(
             f=parse_int(f, 1), 
             x=parse_int(x, 1), 
@@ -253,7 +262,6 @@ class ElementDefinition(BUFRTableObjectBase):
         self.bit_width = parse_int(bit_width, 2)
         self.unit = unit
         self.mnemonic = mnemonic
-        self.desc_code = desc_code
         self.name = name
     def __eq__(self, other):
         match = super().__eq__(other)
@@ -276,7 +284,6 @@ class ElementDefinition(BUFRTableObjectBase):
             elm.attrib.get('bit-width', None),
             elm.attrib.get('unit', None),
             elm.attrib.get('mnemonic', None),
-            elm.attrib.get('desc-code', None),
             elm.attrib.get('name', None)
         )
     def __str__(self):
@@ -294,9 +301,10 @@ class ElementDefinition(BUFRTableObjectBase):
         return data_value
 
 class SequenceDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
-    __slots__ = ('id', 'mnemonic', 'dcod', 'name')
+    __slots__ = ('id', 'mnemonic', 'name')
     __id_class__ = namedtuple('SequenceDefinitionID', ('f', 'x', 'y'))
-    def __init__(self, f, x, y, mnemonic, dcod, name, *args, **kwargs):
+    __child_types__ = ('SequenceElement', )
+    def __init__(self, f, x, y, mnemonic, name, *args, **kwargs):
         super().__init__(*args, **kwargs)
         super().__initialize_id__(self.__id_class__(
             f=parse_int(f, 1),
@@ -304,7 +312,6 @@ class SequenceDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
             y=parse_int(y, 1)
         ))
         self.mnemonic = mnemonic
-        self.dcod = dcod
         self.name = name
     @staticmethod
     def from_xml(elm):
@@ -313,9 +320,8 @@ class SequenceDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
             elm.attrib.get('x', None),
             elm.attrib.get('y', None),
             elm.attrib.get('mnemonic', None),
-            elm.attrib.get('dcode', None),
             elm.attrib.get('name', None),
-            [obj2dict(xml2class(child)) for child in elm]
+            [obj2dict(xml2class(child), SequenceDefinition) for child in elm]
         )
     def __eq__(self, other):
         match = super().__eq__(other)
@@ -359,6 +365,7 @@ class SequenceElement(BUFRTableObjectBase):
 class CodeFlagDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
     __slots__ = ('id','mnemonic')
     __id_class__ = namedtuple('CodeFlagDefinitionID', ('f', 'x', 'y', 'is_flag', 'condition_f', 'condition_x', 'condition_y', 'condition_value'))
+    __child_types__ = ('CodeFlagElement', )
     def __init__(self, f, x, y, is_flag, condition_f, condition_x, condition_y, condition_value, mnemonic, *args, **kwargs):
         super().__init__(*args, **kwargs)
         super().__initialize_id__(self.__id_class__(
@@ -384,7 +391,7 @@ class CodeFlagDefinition(BUFRTableObjectBase, BUFRTableContainerBase):
             elm.attrib.get('condition-y', None),
             elm.attrib.get('condition-value', None),
             elm.attrib.get('mnemonic', None),
-            [obj2dict(xml2class(child)) for child in elm]
+            [obj2dict(xml2class(child), CodeFlagDefinition) for child in elm]
         )
     def __eq__(self, other):
         match = super().__eq__(other)
@@ -481,7 +488,6 @@ def convert_ncep_B_table(in_file, table):
                 parts[3],
                 parts[4],
                 parts[5][0],
-                parts[5][1],
                 parts[5][2]
             ))
         line = in_file.readline().strip()
@@ -503,7 +509,6 @@ def convert_ncep_D_table(in_file, table):
                     parts[0][1],
                     parts[0][2],
                     parts[1][0],
-                    parts[1][1],
                     parts[1][2],
                 )
                 index = 0
