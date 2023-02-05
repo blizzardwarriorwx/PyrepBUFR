@@ -5,7 +5,8 @@ from .debug import dump_hex
 from .external import array, ceil, zeros, floor
 from .operators import Operator
 from .replication import Replication, DelayedReplication
-from .tables import BUFRDataType, ElementDefinition, parse_int, read_xml, Table, SequenceDefinition, SequenceElement
+from .tables import BUFRDataType, ElementDefinition, parse_int, Table, SequenceDefinition, SequenceElement
+from .tables.default import default_table
 from .values import BUFRSubset, SubsetCollection, MessageCollection
 from .utility import read_integer, read_integers
 
@@ -40,11 +41,8 @@ class BitMap(object):
         return value
 
 class BUFRFile(object):
-    def __init__(self, filename, table_source=None):
-        if table_source is None:
-            self.__table_source__ = read_xml('tables.xml')
-        else:
-            self.__table_source__ = table_source
+    def __init__(self, filename, table_source=default_table):
+        self.__table_source__ = table_source
         if type(filename) == str:
             self.__fobj__ = open(filename, 'rb')
         else:
@@ -141,11 +139,8 @@ class BUFRFile(object):
         self.__fobj__.close()
 
 class BUFRMessage(object):
-    def __init__(self, filename, table_source=None, file_offset=0):
-        if table_source is None:
-            self.__table_source__ = read_xml('tables.xml')
-        else:
-            self.__table_source__ = table_source
+    def __init__(self, filename, table_source=default_table, file_offset=0):
+        self.__table_source__ = table_source
         if type(filename) == str:
             self.__fobj__ = open(filename, 'rb')
         else:

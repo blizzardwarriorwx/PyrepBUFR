@@ -133,5 +133,5 @@ dmypy.json
 ._.DS_Store
 
 data/
-tables/
+/tables/
 testing/

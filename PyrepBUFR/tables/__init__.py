@@ -1,3 +1,4 @@
+from bz2 import BZ2File
 from collections import namedtuple
 from copy import deepcopy
 from re import split
@@ -6,8 +7,8 @@ from typing import Any
 from xml.dom.minidom import parseString
 from xml.etree import ElementTree as ET, ElementInclude
 
-from .external import dtype, array
-from .values import *
+from ..external import dtype, array
+from ..values import *
 
 def parse_int(value, byte_width, big_endian=True, unsigned=True):
     return dtype(('u' if unsigned else 'i') + str(byte_width)).type(value) if value is not None else None
@@ -26,15 +27,24 @@ def xml2class(node: ET.Element) -> Any:
     cls = getattr(modules[__name__], node.tag)
     return cls.from_xml(node)
 
-def read_xml(filename: str) -> Any:
+def read_xml(filename: str, decompress_input:bool=False) -> Any:
+    if decompress_input:
+        filename = BZ2File(filename, 'r')
     tree = ET.parse(filename)
     root = tree.getroot()
     ElementInclude.include(root)
     return xml2class(root)
 
-def write_xml(xml_tree: Any, filename: str) -> None:
-    with open(filename, 'w') as out_file:
-        out_file.write(xml_tree.to_xml())
+def write_xml(xml_tree: Any, filename: str, compress_output:bool=False) -> None:
+    if compress_output:
+        out_file = BZ2File(filename, 'w')
+    else:
+        if type(filename) == str:
+            out_file = open(filename, 'wb')
+        else:
+            out_file = filename
+    out_file.write(xml_tree.to_xml().encode('utf-8'))
+    out_file.close()
 
 class BUFRTableObjectBase(object):
     __slots__ = ()
@@ -88,7 +98,7 @@ class BUFRTableObjectBase(object):
                 if value is not None:
                     elm.set(attribute.replace('_', '-'), str(value))
         if self.is_container:
-            for child in sorted(self):
+            for child in sorted(self, key=lambda a: tuple([x for x in a if x is not None])):
                 elm.append(self[child].to_element())
         return elm
     def to_xml(self):

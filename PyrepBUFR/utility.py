@@ -34,3 +34,6 @@ def dict_merge(initial_values, new_values):
     output = deepcopy(initial_values)
     output.update(new_values)
     return output
+
+def transpose(data):
+    return dict([(k, [x.get(k, None) for x in data]) for k in set().union(*[set(x.keys()) for x in data])])
