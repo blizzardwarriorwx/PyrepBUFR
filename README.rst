@@ -9,22 +9,24 @@ Prequisites
 
 None outside of the Python standard packages
 
+ - bz2
  - collections
  - collections.abc
  - copy
+ - io
  - math
  - re
  - sys
- - typing
  - textwrap
- - xml.dom
+ - typing
+ - xml.dom.minidom
  - xml.etree
 
 Optional, will be used if present
 
  - numpy
  - pandas, for optional DataFrame creation
- - pint, for optional unit conversion
+ - metpy.units or pint, for optional unit conversion
 
 Description
 -----------
@@ -35,4 +37,4 @@ Currently under construction in a alpha state, API is unstable
     Nickolai Reimer
 
 :Version:
-    Alpha 2
+    Alpha 3
