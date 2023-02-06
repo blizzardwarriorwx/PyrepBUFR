@@ -1,13 +1,15 @@
 # Import Numpy functions and supply alternatives if not present
 try:
-    from numpy import arange, array, ceil, dtype, floor, frombuffer, log, min_scalar_type, uint8, zeros
+    from numpy import arange, array, ceil, dtype, float64, floor, frombuffer, isnan, log, min_scalar_type, nan, ones, uint8, zeros
 except ModuleNotFoundError:
-    from math import ceil, floor, log
+    from math import ceil, floor, log, isnan
     from re import sub
 
     arange = range
     array = list
     uint8 = int
+    float64 = float
+    nan = float('nan')
     
     def zeros(size, dtype=int):
         if str(dtype).find('int') > -1:
@@ -15,7 +17,14 @@ except ModuleNotFoundError:
         else:
             dtype = float
         return [dtype(0) for i in range(size)]
-    
+
+    def ones(size, dtype=int):
+        if str(dtype).find('int') > -1:
+            dtype = int
+        else:
+            dtype = float
+        return [dtype(1) for i in range(size)]
+
     class dtype(object):
         def __init__(self, spec):
             self.type = int

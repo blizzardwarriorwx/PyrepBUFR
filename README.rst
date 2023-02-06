@@ -13,6 +13,7 @@ None outside of the Python standard packages
  - collections
  - collections.abc
  - copy
+ - datetime
  - io
  - math
  - re

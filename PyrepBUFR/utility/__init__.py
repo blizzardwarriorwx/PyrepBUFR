@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from .external import arange, ceil, frombuffer, log, min_scalar_type, uint8
+from ..external import arange, ceil, frombuffer, isnan, log, min_scalar_type, uint8
 
 def read_integer(byte_string, big_endian=True, unsigned=True):
     padding = b''
@@ -37,3 +37,10 @@ def dict_merge(initial_values, new_values):
 
 def transpose(data):
     return dict([(k, [x.get(k, None) for x in data]) for k in set().union(*[set(x.keys()) for x in data])])
+
+def fill_nan(value_array, replace_value):
+    new_array = deepcopy(value_array)
+    for i in range(len(value_array)):
+        if isnan(new_array[i]):
+            new_array[i] = replace_value
+    return new_array

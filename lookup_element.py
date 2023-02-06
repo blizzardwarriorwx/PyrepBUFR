@@ -1,18 +1,24 @@
 from argparse import ArgumentParser
 
 from PyrepBUFR.tables import read_xml
+from PyrepBUFR.tables.default import default_table
 
 parser = ArgumentParser(description='Look up BUFR element definition information')
 parser.add_argument('-m', '--master-table', metavar='MASTERTABLE', action='store', dest='master_table', type=int, default=0, help='Master table ID to use')
 parser.add_argument('-o', '--originating-center', metavar='CENTER', action='store', dest='originating_center', type=int, default=None, help='Originating center ID to use')
-parser.add_argument('-t', '--tables', metavar="PATH", action='store', dest='tables', type=str, default='tables.xml', help='XML file path containing tables')
+parser.add_argument('-t', '--tables', metavar="PATH", action='store', dest='tables', type=str, default=None, help='XML file path containing tables')
 parser.add_argument('-v', '--table-version', metavar='VERSION', dest='table_version', type=int, default=None, help='BUFR Table version to search')
 parser.add_argument('-n', '--mnemonic', dest='mode', action='store_const', const='mnemonic', default='mnemonic', help='Use mnemonic to search for element')
 parser.add_argument('-i', '--FXY', dest='mode', action='store_const', const='fxy', default='mnemonic', help='Use FXY to search for element')
 parser.add_argument('field', metavar='FIELD', type=str, help='Field mnemonic or FXY to lookup')
 
 args = parser.parse_args()
-tables = read_xml(args.tables)
+
+if args.tables is None:
+    tables = default_table
+else:
+    tables = read_xml(args.tables)
+
 if args.table_version is None:
     args.table_version = max([id.table_version for id in tables.keys() if id.originating_center==args.originating_center and id.master_table==args.master_table])
 b_table = tables.construct_table_version('B', args.table_version, master_table=args.master_table, originating_center=args.originating_center)
