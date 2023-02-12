@@ -159,7 +159,7 @@ class ModelSounding(BUFRSounding):
         self.sounding_datetime = datetime(content[0]['nominal_year'], content[0]['nominal_month'], content[0]['nominal_day'], content[0]['nominal_hour'], content[0]['nominal_minute'], content[0]['nominal_second']) + timedelta(seconds=int(content[0]['FTIM']))
 
         self.pressure = clear_empty_array(array([x['PRES'] if 'PRES' in x else None for x in content], dtype='float64'))
-        self.pressure = clear_empty_array(array([ x['GELV'] - pressure_to_height_std(x['PRSS']) - pressure_to_height_std(x['PRES']) if 'GELV' in x and 'PRSS' in x and 'PRES' in x else None for x in content], dtype='float64'))
+        self.height = clear_empty_array(array([ x['GELV'] - pressure_to_height_std(x['PRSS']) + pressure_to_height_std(x['PRES']) if 'GELV' in x and 'PRSS' in x and 'PRES' in x else None for x in content], dtype='float64'))
         self.dry_buld_temperature = clear_empty_array(array([x['TMDB'] if 'TMDB' in x else None for x in content], dtype='float64'))
         self.dewpoint_temperature = clear_empty_array(array([dewpoint_from_specific_humidity(x['PRES'], x['TMDB'], x['SPFH']) if 'PRES' in x and 'TMDB' in x and 'SPFH' in x else None for x in content], dtype='float64'))
         self.wind_direction = clear_empty_array(array([wind_direction(x['UWND'], x['VWND']) if 'UWND' in x and 'VWND' in x else None for x in content], dtype='float64'))
