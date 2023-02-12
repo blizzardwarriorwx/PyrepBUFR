@@ -1,6 +1,6 @@
 # Import Numpy functions and supply alternatives if not present
 try:
-    from numpy import arange, array, ceil, diff, dtype, float64, floor, frombuffer, isnan, log, min_scalar_type, nan, ones, uint8, zeros
+    from numpy import arange, arctan2, array, ceil, diff, dtype, exp, float64, floor, frombuffer, hypot, isfinite, isnan, log, min_scalar_type, nan, ones, pi, uint8, zeros
 
     numpy_found = True
 
@@ -29,17 +29,20 @@ try:
         return ones(shape) * value
 
 except ModuleNotFoundError:
-    from math import ceil, floor, log, isnan
+    from math import atan2 as arctan2, ceil, exp, floor, hypot, log, isfinite, isnan, pi
     from re import sub
 
     numpy_found = False
 
     arange = range
-    array = list
+    
     uint8 = int
     float64 = float
     nan = float('nan')
     
+    def array(values, dtype=None):
+        return values
+
     def zeros(size, dtype=int):
         if str(dtype).find('int') > -1:
             dtype = int

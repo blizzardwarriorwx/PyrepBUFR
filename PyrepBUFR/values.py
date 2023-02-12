@@ -13,7 +13,8 @@ unit_substituions = {
     'Degree true': 'degree',
     'gpm': 'meter',
     '%': 'percent',
-    'PA': 'Pa'
+    'PA': 'Pa',
+    'M/S': 'm/s'
 }
 
 class BUFRValueBase(object):
