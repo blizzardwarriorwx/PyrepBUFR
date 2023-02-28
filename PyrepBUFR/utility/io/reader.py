@@ -148,7 +148,7 @@ class ModelSounding(BUFRSounding):
 
         content = sorted([x for x in bufr_data if 'PRES' in x and x['PRES'] is not None and isfinite(x['PRES']) and x['PRES'] > 50], key=lambda a: a['PRES'], reverse=True)
 
-        if content[0]['RPID'] is not None and content[0]['RPID'] != '':
+        if 'RPID' in content[0] and content[0]['RPID'] is not None and content[0]['RPID'] != '':
             self.station_id = content[0]['RPID']
         elif content[0]['STNM'] is not None:
             self.station_id = str(content[0]['STNM'])
